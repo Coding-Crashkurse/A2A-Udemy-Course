@@ -20,7 +20,9 @@ async def load_card(port: int) -> AgentCard:
             return await A2ACardResolver(http, base_url).get_agent_card()
     except Exception:
         logger.info("No HTTP AgentCard on %s -> assuming gRPC server", base_url)
-        return minimal_agent_card(url=f"localhost:{port}", transports=[TransportProtocol.grpc])
+        return minimal_agent_card(
+            url=f"localhost:{port}", transports=[TransportProtocol.grpc]
+        )
 
 
 def build_config() -> ClientConfig:

@@ -21,8 +21,8 @@ from a2a.utils import get_artifact_text, get_message_text
 
 BASE_URL = "http://localhost:8001"
 
-KILL_AFTER_SECONDS = 6.0          # wie lange wir die erste Stream-Verbindung laufen lassen
-OFFLINE_SECONDS = 3.0             # wie lange wir "offline" sind, bevor wir resubscriben
+KILL_AFTER_SECONDS = 6.0
+OFFLINE_SECONDS = 3.0
 
 
 def fmt_update(task: Task, update) -> str:
@@ -111,7 +111,9 @@ async def main() -> None:
         await asyncio.sleep(0.05)
 
     # 2) Connection killen
-    print(f"\n>>> wait {KILL_AFTER_SECONDS:.1f}s then KILL connection (close client #1) ...\n")
+    print(
+        f"\n>>> wait {KILL_AFTER_SECONDS:.1f}s then KILL connection (close client #1) ...\n"
+    )
     await asyncio.sleep(KILL_AFTER_SECONDS)
 
     # "hard-ish" kill: close transport (closes underlying httpx client/socket)

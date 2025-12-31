@@ -52,7 +52,7 @@ def main(
     ),
     history_length: int | None = typer.Option(
         None,
-        help="historyLength semantics: unset=None (server default), 0=omit, >0=limit",
+        help="historyLength semantics: unset=None (server default), 0=no limit, >0=limit",
     ),
 ) -> None:
     async def _run() -> None:

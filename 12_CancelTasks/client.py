@@ -35,7 +35,9 @@ async def create_task_fire_and_forget(client, *, context_id: str, text: str) -> 
         context_id=context_id,
         parts=[Part(root=TextPart(text=text))],
     )
-    it = client.send_message(msg, configuration=MessageSendConfiguration(blocking=False))
+    it = client.send_message(
+        msg, configuration=MessageSendConfiguration(blocking=False)
+    )
     task, _update = await anext(it)
     await it.aclose()
     return task
@@ -65,7 +67,9 @@ async def wait_for_state(
         if state == target:
             return last
         if elapsed > timeout_s:
-            raise RuntimeError(f"Timeout waiting for {target.value}, last={state.value}")
+            raise RuntimeError(
+                f"Timeout waiting for {target.value}, last={state.value}"
+            )
         await asyncio.sleep(poll_s)
 
 
@@ -99,7 +103,9 @@ async def main() -> None:
             # Demo A: cancel mid-flight
             # -------------------------
             print("\n=== DEMO A: cancel mid-flight ===")
-            t1 = await create_task_fire_and_forget(client, context_id=context_id, text="Job A (cancel me)")
+            t1 = await create_task_fire_and_forget(
+                client, context_id=context_id, text="Job A (cancel me)"
+            )
             print("created:", fmt_task_line(t1))
 
             await asyncio.sleep(2.0)
@@ -113,13 +119,17 @@ async def main() -> None:
             print(f"cancel #1: http={code} ({explain_cancel(code)}) body={body[:200]}")
 
             print("\nwait until state=canceled ...")
-            canceled_task = await wait_for_state(client, t1.id, TaskState.canceled, timeout_s=20.0)
+            canceled_task = await wait_for_state(
+                client, t1.id, TaskState.canceled, timeout_s=20.0
+            )
             print("final:", fmt_task_line(canceled_task))
 
             # Spec-konform: Cancel auf bereits canceled -> 409 TaskNotCancelableError
             print("\nCancel again (idempotent by effect; expect 409)...")
             code2, body2 = await cancel_task_rest(http, t1.id)
-            print(f"cancel #2: http={code2} ({explain_cancel(code2)}) body={body2[:200]}")
+            print(
+                f"cancel #2: http={code2} ({explain_cancel(code2)}) body={body2[:200]}"
+            )
 
             again = await client.get_task(TaskQueryParams(id=t1.id))
             print("after cancel #2:", fmt_task_line(again))
@@ -128,16 +138,22 @@ async def main() -> None:
             # Demo B: cancel after completion -> 409
             # -----------------------------------------
             print("\n=== DEMO B: cancel after completion (expect 409) ===")
-            t2 = await create_task_fire_and_forget(client, context_id=context_id, text="Job B (complete me)")
+            t2 = await create_task_fire_and_forget(
+                client, context_id=context_id, text="Job B (complete me)"
+            )
             print("created:", fmt_task_line(t2))
 
             print("\nwaiting until completed (~30s)...")
-            done = await wait_for_state(client, t2.id, TaskState.completed, timeout_s=80.0)
+            done = await wait_for_state(
+                client, t2.id, TaskState.completed, timeout_s=80.0
+            )
             print("completed:", fmt_task_line(done))
 
             print("\nTry cancel on completed task (expect 409)...")
             code3, body3 = await cancel_task_rest(http, t2.id)
-            print(f"cancel completed: http={code3} ({explain_cancel(code3)}) body={body3[:400]}")
+            print(
+                f"cancel completed: http={code3} ({explain_cancel(code3)}) body={body3[:400]}"
+            )
 
         finally:
             await client.close()

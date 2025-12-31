@@ -160,7 +160,11 @@ async def main() -> None:
                 page_size=50,
                 page_token=None,
             )
-            print_list("LIST (filter status=completed, includeArtifacts=true)", completed, next_c)
+            print_list(
+                "LIST (filter status=completed, includeArtifacts=true)",
+                completed,
+                next_c,
+            )
 
         finally:
             await client.close()

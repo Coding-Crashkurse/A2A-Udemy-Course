@@ -15,16 +15,16 @@ from a2a.types import (
     AgentCapabilities,
     Artifact,
     InvalidParamsError,
-    Message,
     Part,
-    Role,
     Task,
     TaskState,
     TaskStatus,
     TextPart,
     TransportProtocol,
 )
+from a2a.utils import new_agent_text_message
 from a2a.utils.errors import ServerError
+from a2a.utils.task import apply_history_length as apply_history_length_task
 
 HOST = "localhost"
 PORT = 8001
@@ -34,33 +34,6 @@ app = typer.Typer(add_completion=False)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger("04_Configuration")
-
-
-def apply_history_length(history: list[Message], history_length: int | None) -> list[Message]:
-    """
-    Kurs-Demo (passt zu deinem SDK-Verhalten):
-      - None/unset -> server default: kein history zurückgeben
-      - 0          -> kein history zurückgeben
-      - >0         -> letzte N Messages
-    """
-    if history_length is None:
-        return []
-    if history_length < 0:
-        raise ServerError(InvalidParamsError(message="historyLength must be >= 0"))
-    if history_length == 0:
-        return []
-    return history[-history_length:]
-
-
-def new_agent_text(context: RequestContext, text: str) -> Message:
-    # Happy path: task_id/context_id sind da
-    return Message(
-        role=Role.agent,
-        message_id=str(uuid.uuid4()),
-        context_id=context.context_id,
-        task_id=context.task_id,
-        parts=[Part(root=TextPart(text=text))],
-    )
 
 
 class ConfigurationDemoExecutor(AgentExecutor):
@@ -74,6 +47,8 @@ class ConfigurationDemoExecutor(AgentExecutor):
         cfg = context.configuration
         blocking = bool(cfg.blocking) if cfg and cfg.blocking is not None else False
         history_length = cfg.history_length if cfg else None
+        if history_length is not None and history_length < 0:
+            raise ServerError(InvalidParamsError(message="historyLength must be >= 0"))
 
         user_text = context.get_user_input()
 
@@ -86,14 +61,18 @@ class ConfigurationDemoExecutor(AgentExecutor):
         )
 
         # 1) Immer zuerst "working" Event
-        started_msg = new_agent_text(context, "Working… (step 1/2)")
+        started_msg = new_agent_text_message(
+            "Working… (step 1/2)",
+            context_id=context.context_id,
+            task_id=context.task_id,
+        )
         initial_history_full = [context.message, started_msg]
 
         initial_task = Task(
             id=context.task_id,
             context_id=context.context_id,
             status=TaskStatus(state=TaskState.working, message=started_msg),
-            history=apply_history_length(initial_history_full, history_length),
+            history=initial_history_full,
             artifacts=[],
             metadata={
                 "section": "04_Configuration",
@@ -102,13 +81,18 @@ class ConfigurationDemoExecutor(AgentExecutor):
                 "history_length": history_length,
             },
         )
+        initial_task = apply_history_length_task(initial_task, history_length)
         await event_queue.enqueue_event(initial_task)
 
         # 2) Simulierter Workload
         await asyncio.sleep(self.delay_seconds)
 
         # 3) Finaler Task
-        done_msg = new_agent_text(context, f"Done ✅ Echo: {user_text}")
+        done_msg = new_agent_text_message(
+            f"Done ✅ Echo: {user_text}",
+            context_id=context.context_id,
+            task_id=context.task_id,
+        )
 
         artifact = Artifact(
             artifact_id=str(uuid.uuid4()),
@@ -123,7 +107,7 @@ class ConfigurationDemoExecutor(AgentExecutor):
             id=context.task_id,
             context_id=context.context_id,
             status=TaskStatus(state=TaskState.completed, message=done_msg),
-            history=apply_history_length(final_history_full, history_length),
+            history=final_history_full,
             artifacts=[artifact],
             metadata={
                 "section": "04_Configuration",
@@ -132,6 +116,7 @@ class ConfigurationDemoExecutor(AgentExecutor):
                 "history_length": history_length,
             },
         )
+        final_task = apply_history_length_task(final_task, history_length)
         await event_queue.enqueue_event(final_task)
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:

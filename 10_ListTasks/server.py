@@ -24,14 +24,14 @@ from a2a.utils import new_task
 
 # TaskStore Interface kann je nach SDK-Pfad variieren
 try:
-    from a2a.server.tasks import TaskStore  # type: ignore
-except Exception:  # pragma: no cover
-    from a2a.server.tasks.task_store import TaskStore  # type: ignore
+    from a2a.server.tasks import TaskStore
+except Exception:
+    from a2a.server.tasks.task_store import TaskStore
 
 try:
-    from a2a.server.context import ServerCallContext  # type: ignore
-except Exception:  # pragma: no cover
-    ServerCallContext = Any  # type: ignore
+    from a2a.server.context import ServerCallContext
+except Exception:
+    ServerCallContext = Any
 
 
 HOST = "localhost"
@@ -58,7 +58,9 @@ class InspectableInMemoryTaskStore(TaskStore):
         self._created_at: dict[str, float] = {}
         self._lock = asyncio.Lock()
 
-    async def get(self, task_id: str, context: ServerCallContext | None = None) -> Task | None:
+    async def get(
+        self, task_id: str, context: ServerCallContext | None = None
+    ) -> Task | None:
         async with self._lock:
             return self._tasks.get(task_id)
 
@@ -70,7 +72,9 @@ class InspectableInMemoryTaskStore(TaskStore):
                 self._created_order.append(task.id)
                 self._created_at[task.id] = time.time()
 
-    async def delete(self, task_id: str, context: ServerCallContext | None = None) -> None:
+    async def delete(
+        self, task_id: str, context: ServerCallContext | None = None
+    ) -> None:
         async with self._lock:
             self._tasks.pop(task_id, None)
             # created_order nicht aufwendig bereinigen (Demo)
@@ -105,13 +109,20 @@ class InspectableInMemoryTaskStore(TaskStore):
                     continue
                 if context_id and t.context_id != context_id:
                     continue
-                if status_norm and t.status and t.status.state and t.status.state.value != status_norm:
+                if (
+                    status_norm
+                    and t.status
+                    and t.status.state
+                    and t.status.state.value != status_norm
+                ):
                     continue
                 filtered.append(t)
 
             total = len(filtered)
             page = filtered[offset : offset + page_size]
-            next_token = str(offset + page_size) if (offset + page_size) < total else None
+            next_token = (
+                str(offset + page_size) if (offset + page_size) < total else None
+            )
 
             out: list[dict[str, Any]] = []
             for t in page:
@@ -146,7 +157,9 @@ class FireAndForget30sExecutor(AgentExecutor):
 
         await updater.update_status(
             TaskState.working,
-            updater.new_agent_message([Part(root=TextPart(text="Accepted. Working... (~30s)"))]),
+            updater.new_agent_message(
+                [Part(root=TextPart(text="Accepted. Working... (~30s)"))]
+            ),
         )
 
         # Simulierter Workload mit 3 Progress-Updates
@@ -154,7 +167,9 @@ class FireAndForget30sExecutor(AgentExecutor):
             await asyncio.sleep(DURATION_SECONDS / 3.0)
             await updater.update_status(
                 TaskState.working,
-                updater.new_agent_message([Part(root=TextPart(text=f"Progress {i}/3"))]),
+                updater.new_agent_message(
+                    [Part(root=TextPart(text=f"Progress {i}/3"))]
+                ),
             )
 
         # Damit includeArtifacts Sinn macht
@@ -205,7 +220,9 @@ async def list_tasks(
     context_id: str | None = Query(default=None, alias="contextId"),
     status: str | None = Query(default=None, alias="status"),
     include_artifacts: bool = Query(default=False, alias="includeArtifacts"),
-    page_size: int = Query(default=PAGE_SIZE_DEFAULT, alias="pageSize", ge=1, le=PAGE_SIZE_MAX),
+    page_size: int = Query(
+        default=PAGE_SIZE_DEFAULT, alias="pageSize", ge=1, le=PAGE_SIZE_MAX
+    ),
     page_token: str | None = Query(default=None, alias="pageToken"),
 ) -> dict[str, Any]:
     tasks, next_token = await task_store.list_snapshot(

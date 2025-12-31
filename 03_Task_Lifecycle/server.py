@@ -57,7 +57,13 @@ class TaskLifecycleExecutor(AgentExecutor):
                     "artifact_id": "fake-pdf",
                     "name": "fake.pdf",
                     "description": "Fake PDF artifact (placeholder).",
-                    "parts": [Part(root=TextPart(text="PDF placeholder content (not a real PDF)."))],
+                    "parts": [
+                        Part(
+                            root=TextPart(
+                                text="PDF placeholder content (not a real PDF)."
+                            )
+                        )
+                    ],
                     "metadata": {"media_type": "application/pdf"},
                 }
             ]
@@ -68,7 +74,10 @@ class TaskLifecycleExecutor(AgentExecutor):
             status=TaskStatus(state=self.terminal_state, message=agent_msg),
             history=[context.message, agent_msg],
             artifacts=artifacts,
-            metadata={"section": "03_Tasks", "terminal_state": self.terminal_state.value},
+            metadata={
+                "section": "03_Tasks",
+                "terminal_state": self.terminal_state.value,
+            },
         )
 
         await event_queue.enqueue_event(task)
@@ -83,7 +92,13 @@ def main(
     rejected: bool = typer.Option(False),
     failed: bool = typer.Option(False),
 ) -> None:
-    terminal_state = TaskState.failed if failed else TaskState.rejected if rejected else TaskState.completed
+    terminal_state = (
+        TaskState.failed
+        if failed
+        else TaskState.rejected
+        if rejected
+        else TaskState.completed
+    )
 
     agent_card = AgentCard(
         name="03_Tasks - Fixed Lifecycle Demo Agent (REST)",

@@ -61,7 +61,9 @@ def build_agent_card(
     )
 
 
-def create_request_handler(executor: AgentExecutor | None = None) -> DefaultRequestHandler:
+def create_request_handler(
+    executor: AgentExecutor | None = None,
+) -> DefaultRequestHandler:
     """Instantiate the default handler with an in-memory task store."""
     return DefaultRequestHandler(
         agent_executor=executor or EchoExecutor(),

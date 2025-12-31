@@ -72,7 +72,13 @@ class MultiTurnStreamingExecutor(AgentExecutor):
             await updater.update_status(
                 TaskState.working,
                 updater.new_agent_message(
-                    [Part(root=TextPart(text="Okay — kurze Rückfrage bevor ich weiter mache…"))]
+                    [
+                        Part(
+                            root=TextPart(
+                                text="Okay — kurze Rückfrage bevor ich weiter mache…"
+                            )
+                        )
+                    ]
                 ),
             )
             await asyncio.sleep(1.0)
@@ -89,12 +95,18 @@ class MultiTurnStreamingExecutor(AgentExecutor):
 
         await updater.update_status(
             TaskState.working,
-            updater.new_agent_message([Part(root=TextPart(text=f"Danke {answer}! Ich mache weiter…"))]),
+            updater.new_agent_message(
+                [Part(root=TextPart(text=f"Danke {answer}! Ich mache weiter…"))]
+            ),
         )
         await asyncio.sleep(1.0)
 
         await updater.add_artifact(
-            [Part(root=TextPart(text=f"Hallo {answer}! ✅ (Multi-Turn abgeschlossen)"))],
+            [
+                Part(
+                    root=TextPart(text=f"Hallo {answer}! ✅ (Multi-Turn abgeschlossen)")
+                )
+            ],
             name="greeting.txt",
         )
 

@@ -9,7 +9,7 @@ from .shared import build_agent_card, create_request_handler
 try:
     import grpc
     from a2a.grpc import a2a_pb2_grpc
-except ImportError as e:  # pragma: no cover
+except ImportError as e:
     raise SystemExit(
         'gRPC dependencies are required. Install with: pip install "a2a-sdk[grpc]"'
     ) from e

@@ -22,9 +22,9 @@ from a2a.utils.errors import ServerError
 
 # Optional je nach SDK-Version
 try:
-    from a2a.types import TaskNotCancelableError  # type: ignore
-except Exception:  # pragma: no cover
-    TaskNotCancelableError = None  # type: ignore
+    from a2a.types import TaskNotCancelableError
+except Exception:
+    TaskNotCancelableError = None
 
 HOST = "localhost"
 PORT = 8001
@@ -43,7 +43,7 @@ def _raise_not_cancelable(msg: str) -> None:
     Fallback: InvalidParamsError.
     """
     if TaskNotCancelableError is not None:
-        raise ServerError(TaskNotCancelableError(message=msg))  # type: ignore
+        raise ServerError(TaskNotCancelableError(message=msg))
     raise ServerError(InvalidParamsError(message=msg))
 
 
@@ -75,10 +75,14 @@ class Cancelable30sExecutor(AgentExecutor):
             await asyncio.sleep(1.0)
 
             if cancel_ev.is_set():
-                log.info("execute: task_id=%s observed cancel flag at t=%ss", task.id, sec)
+                log.info(
+                    "execute: task_id=%s observed cancel flag at t=%ss", task.id, sec
+                )
                 await updater.update_status(
                     TaskState.canceled,
-                    updater.new_agent_message([Part(root=TextPart(text="Canceled ✅"))]),
+                    updater.new_agent_message(
+                        [Part(root=TextPart(text="Canceled ✅"))]
+                    ),
                 )
                 CANCEL_EVENT_BY_TASK_ID.pop(task.id, None)
                 return
@@ -87,7 +91,13 @@ class Cancelable30sExecutor(AgentExecutor):
                 await updater.update_status(
                     TaskState.working,
                     updater.new_agent_message(
-                        [Part(root=TextPart(text=f"Progress: {sec}/{DURATION_SECONDS}s"))]
+                        [
+                            Part(
+                                root=TextPart(
+                                    text=f"Progress: {sec}/{DURATION_SECONDS}s"
+                                )
+                            )
+                        ]
                     ),
                 )
 
@@ -120,7 +130,12 @@ class Cancelable30sExecutor(AgentExecutor):
         state = task.status.state if task.status else None
         log.info("cancel: task_id=%s state=%s", task_id, getattr(state, "value", state))
 
-        if state in {TaskState.completed, TaskState.failed, TaskState.rejected, TaskState.canceled}:
+        if state in {
+            TaskState.completed,
+            TaskState.failed,
+            TaskState.rejected,
+            TaskState.canceled,
+        }:
             _raise_not_cancelable(f"Task cannot be canceled - current state: {state}")
 
         # best-effort cooperative cancellation

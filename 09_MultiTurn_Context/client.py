@@ -87,7 +87,7 @@ async def main() -> None:
             # --------------------
             # TURN 2: Antwort (same task_id)
             # --------------------
-            answer_text = "Markus"  # für Demo hardcoded
+            answer_text = "Markus"
             followup_msg = Message(
                 role=Role.user,
                 message_id=str(uuid.uuid4()),
