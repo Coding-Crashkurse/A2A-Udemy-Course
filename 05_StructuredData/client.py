@@ -1,18 +1,21 @@
 import asyncio
 import json
 import uuid
+from typing import Literal
 
 import httpx
 import typer
 
 from a2a.client import ClientConfig, ClientFactory
 from a2a.client.card_resolver import A2ACardResolver
-from a2a.types import DataPart, Message, MessageSendConfiguration, Part, Role, Task
+from a2a.types import DataPart, Message, Part, Role, Task
 from a2a.utils import get_message_text
 from a2a.utils.parts import get_data_parts
 
 BASE_URL = "http://localhost:8001"
 app = typer.Typer(add_completion=False)
+
+TicketStatus = Literal["open", "closed"]
 
 
 def _print_task(task: Task) -> None:
@@ -39,7 +42,9 @@ def _print_task(task: Task) -> None:
 
 @app.callback(invoke_without_command=True)
 def main(
-    status: str = typer.Option("open", help="Ticket status filter: open|closed"),
+    status: TicketStatus = typer.Option(
+        "open", help="Ticket status filter: open|closed"
+    ),
 ) -> None:
     async def _run() -> None:
         async with httpx.AsyncClient(timeout=30) as http:
@@ -69,10 +74,7 @@ def main(
                     ],
                 )
 
-                it = client.send_message(
-                    msg,
-                    configuration=MessageSendConfiguration(blocking=True),
-                )
+                it = client.send_message(msg)
                 task, _update = await anext(it)
                 await it.aclose()
 
