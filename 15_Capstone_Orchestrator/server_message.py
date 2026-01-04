@@ -1,7 +1,4 @@
-from __future__ import annotations
-
 import logging
-from typing import cast
 
 import uvicorn
 from dotenv import load_dotenv
@@ -14,10 +11,10 @@ from a2a.server.apps import A2ARESTFastAPIApplication
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
-from a2a.types import AgentCapabilities, AgentCard, AgentSkill, Message, TransportProtocol
+from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TransportProtocol
 from a2a.utils import new_agent_text_message, new_task
 
-load_dotenv()  # reads OPENAI_API_KEY from .env
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger("GeneralMessageAgent")
@@ -40,16 +37,16 @@ class GeneralMessageExecutor(AgentExecutor):
             model=MODEL,
             tools=[],
             system_prompt=(
-                "Du bist ein allgemeiner Assistant.\n"
-                "Antworte auf Deutsch.\n"
-                "Kein Fußball-Fokus, einfach normal hilfreich."
+                "You are a general assistant.\n"
+                "Answer in English.\n"
+                "Be concise and practical."
             ),
         )
 
         result = await agent.ainvoke({"messages": [HumanMessage(content=user_text)]})
-        answer = cast(str, result["messages"][-1].content)
+        answer = result["messages"][-1].content
 
-        task = new_task(cast(Message, context.message))  # immer neuer Task
+        task = new_task(context.message)
         await event_queue.enqueue_event(task)
 
         updater = TaskUpdater(event_queue, task.id, task.context_id)
@@ -69,7 +66,7 @@ class GeneralMessageExecutor(AgentExecutor):
 
 agent_card = AgentCard(
     name="General Message Agent (REST + LLM)",
-    description="Allgemeiner LLM-Agent (kein Streaming).",
+    description="General-purpose agent. Advertises streaming=false in AgentCard.",
     url=BASE_URL,
     version="0.1.0-demo",
     protocol_version="0.3.0",
@@ -81,11 +78,11 @@ agent_card = AgentCard(
         AgentSkill(
             id="general.chat",
             name="General Q&A",
-            description="Allgemeine Fragen beantworten.",
+            description="Answers general questions.",
             tags=["general", "chat", "llm"],
             examples=[
-                "Erklär mir kurz den Unterschied zwischen Threads und AsyncIO.",
-                "Gib mir 5 Ideen für ein Abendessen.",
+                "Explain JSON-RPC briefly.",
+                "Give me 5 dinner ideas.",
             ],
             input_modes=["text/plain"],
             output_modes=["text/plain"],

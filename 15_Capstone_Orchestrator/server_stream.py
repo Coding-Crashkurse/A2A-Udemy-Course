@@ -1,8 +1,4 @@
-from __future__ import annotations
-
-import asyncio
 import logging
-from typing import cast
 
 import uvicorn
 from dotenv import load_dotenv
@@ -15,18 +11,10 @@ from a2a.server.apps import A2ARESTFastAPIApplication
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
-from a2a.types import (
-    AgentCapabilities,
-    AgentCard,
-    AgentSkill,
-    Message,
-    Part,
-    TextPart,
-    TransportProtocol,
-)
+from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TransportProtocol
 from a2a.utils import new_agent_text_message, new_task
 
-load_dotenv()  # reads OPENAI_API_KEY from .env
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger("FootballStreamingAgent")
@@ -49,48 +37,20 @@ class FootballStreamingExecutor(AgentExecutor):
             model=MODEL,
             tools=[],
             system_prompt=(
-                "Du bist ein Fußball-Experte (Association Football/Soccer).\n"
-                "Du darfst NUR über Fußball reden.\n"
-                "Wenn die Frage nicht primär Fußball ist, lehne kurz ab und bitte um eine Fußball-Frage.\n"
-                "Antworte auf Deutsch, präzise und hilfreich."
+                "You are an expert for association football (soccer).\n"
+                "You must ONLY talk about soccer.\n"
+                "If the user's question is not primarily about soccer, refuse briefly and ask for a soccer question.\n"
+                "Answer in English, precise and helpful."
             ),
         )
 
         result = await agent.ainvoke({"messages": [HumanMessage(content=user_text)]})
-        answer = cast(str, result["messages"][-1].content)
+        answer = result["messages"][-1].content
 
-        task = new_task(cast(Message, context.message))  # immer neuer Task (Happy Path)
+        task = new_task(context.message)
         await event_queue.enqueue_event(task)
 
         updater = TaskUpdater(event_queue, task.id, task.context_id)
-
-        # Optionaler "working"-Ping
-        await updater.start_work(
-            new_agent_text_message(
-                "Ich schaue mir das kurz an …",
-                context_id=task.context_id,
-                task_id=task.id,
-            )
-        )
-
-        # Stream per Artifact-Chunks (append)
-        artifact_id = "football-answer"
-        chunk_size = 220
-        chunks = [answer[i : i + chunk_size] for i in range(0, len(answer), chunk_size)]
-
-        for idx, chunk in enumerate(chunks):
-            last = idx == (len(chunks) - 1)
-            await updater.add_artifact(
-                parts=[Part(root=TextPart(text=chunk))],
-                artifact_id=artifact_id,
-                name="answer.txt",
-                metadata={"mediaType": "text/plain"},
-                append=True if idx > 0 else None,
-                last_chunk=True if last else None,
-            )
-            await asyncio.sleep(0.05)
-
-        # Finaler Task-Status (completed) mit Message
         await updater.complete(
             new_agent_text_message(
                 answer,
@@ -107,7 +67,7 @@ class FootballStreamingExecutor(AgentExecutor):
 
 agent_card = AgentCard(
     name="Football Streaming Agent (REST + LLM)",
-    description="Darf ausschließlich über Fußball sprechen. Liefert optional Artefakt-Chunks (Streaming).",
+    description="Soccer-only agent. Advertises streaming=true in AgentCard.",
     url=BASE_URL,
     version="0.1.0-demo",
     protocol_version="0.3.0",
@@ -118,12 +78,12 @@ agent_card = AgentCard(
     skills=[
         AgentSkill(
             id="sports.football.chat",
-            name="Fußball Q&A (Streaming)",
-            description="Antwortet nur zu Fußball-Themen (Soccer).",
+            name="Soccer Q&A (Streaming)",
+            description="Answers only soccer-related questions.",
             tags=["football", "soccer", "sports", "streaming"],
             examples=[
-                "Wer sind die Favoriten in der Bundesliga?",
-                "Erklär mir Abseits kurz und sauber.",
+                "Explain the offside rule briefly.",
+                "How does the Champions League format work?",
             ],
             input_modes=["text/plain"],
             output_modes=["text/plain"],

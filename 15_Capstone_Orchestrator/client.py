@@ -1,13 +1,12 @@
-from __future__ import annotations
-
 import asyncio
 
 import httpx
 import typer
 
-from a2a.client import ClientConfig, ClientFactory, create_text_message_object
+from a2a.client import ClientConfig, create_text_message_object
 from a2a.client.card_resolver import A2ACardResolver
-from a2a.types import Task
+from a2a.client.client_factory import ClientFactory
+from a2a.types import TransportProtocol
 from a2a.utils import get_message_text
 
 BASE_URL = "http://localhost:8001"
@@ -16,35 +15,30 @@ app = typer.Typer(add_completion=False)
 
 
 @app.callback(invoke_without_command=True)
-def main(text: str = typer.Option("Erklär mir Abseits im Fußball kurz.")) -> None:
+def main(text: str = typer.Option("Explain the offside rule in soccer briefly.")) -> None:
     async def _run() -> None:
-        async with httpx.AsyncClient() as http:
+        timeout = httpx.Timeout(60.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as http:
             card = await A2ACardResolver(http, BASE_URL).get_agent_card()
 
-            client = await ClientFactory.connect(
-                card,
-                client_config=ClientConfig(
-                    streaming=False,  # Orchestrator selbst streamt nicht
-                    polling=False,
-                    supported_transports=[card.preferred_transport],
+            client = ClientFactory(
+                ClientConfig(
                     httpx_client=http,
-                ),
-            )
+                    supported_transports=[TransportProtocol.http_json],
+                    streaming=False,
+                    polling=False,
+                )
+            ).create(card)
 
             try:
                 msg = create_text_message_object(content=text)
 
-                last_task: Task | None = None
-                async for ev in client.send_message(msg):
-                    if isinstance(ev, tuple):
-                        task, _update = ev
-                        last_task = task
+                events = client.send_message(msg)
+                task, _ = await anext(events)
+                async for task, _ in events:
+                    pass
 
-                if last_task is None or last_task.status.message is None:
-                    print("(no task message)")
-                    return
-
-                print(get_message_text(last_task.status.message))
+                print(get_message_text(task.status.message))
             finally:
                 await client.close()
 
