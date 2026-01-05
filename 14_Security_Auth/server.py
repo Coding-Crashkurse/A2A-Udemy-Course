@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 import time
 import uuid
 from typing import Any, cast
@@ -35,7 +36,7 @@ from a2a.types import (
 from a2a.utils.constants import AGENT_CARD_WELL_KNOWN_PATH
 from a2a.utils import new_task
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
 HOST: str = "0.0.0.0"
 PORT: int = 8001

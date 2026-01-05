@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 import uuid
 from typing import Any, cast
 
@@ -22,7 +23,7 @@ from a2a.types import (
 )
 import json
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
 app = typer.Typer(add_completion=False)
 

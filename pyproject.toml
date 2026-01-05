@@ -13,4 +13,6 @@ dependencies = [
     "ruff>=0.14.10",
     "python-dotenv>=1.2.1",
     "python-jose>=3.5.0",
+    "langchain>=1.2.0",
+    "langchain-openai>=1.1.6",
 ]

@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import uvicorn
 from dotenv import load_dotenv
@@ -14,7 +15,7 @@ from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TransportProtocol
 from a2a.utils import new_agent_text_message, new_task
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger("GeneralMessageAgent")

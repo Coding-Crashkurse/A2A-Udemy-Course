@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Literal, cast
 
 import httpx
@@ -28,7 +29,7 @@ from a2a.types import (
 )
 from a2a.utils.errors import ServerError
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 cli = typer.Typer(add_completion=False)
 
 AUTH0_DOMAIN = os.environ["AUTH0_DOMAIN"]

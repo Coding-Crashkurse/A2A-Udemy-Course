@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 from typing import Any, Literal, cast
 
 import httpx
 import typer
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 app = typer.Typer(add_completion=False)
 
 AUTH0_DOMAIN: str = os.environ["AUTH0_DOMAIN"]
