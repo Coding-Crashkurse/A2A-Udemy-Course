@@ -4,7 +4,7 @@ import logging
 from a2a.server.request_handlers import GrpcHandler
 from a2a.types import TransportProtocol
 
-from .shared import build_agent_card, create_request_handler
+from shared import build_agent_card, create_request_handler
 
 try:
     import grpc

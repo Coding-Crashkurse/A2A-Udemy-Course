@@ -11,6 +11,7 @@ from a2a.server.events import EventQueue
 from a2a.types import (
     AgentCard,
     AgentCapabilities,
+    Artifact,
     Message,
     Part,
     Role,
@@ -50,22 +51,22 @@ class TaskLifecycleExecutor(AgentExecutor):
             parts=[Part(root=TextPart(text=text))],
         )
 
-        artifacts = []
+        artifacts: list[Artifact] = []
         if self.terminal_state == TaskState.completed:
             artifacts = [
-                {
-                    "artifact_id": "fake-pdf",
-                    "name": "fake.pdf",
-                    "description": "Fake PDF artifact (placeholder).",
-                    "parts": [
+                Artifact(
+                    artifact_id="fake-pdf",
+                    name="fake.pdf",
+                    description="Fake PDF artifact (placeholder).",
+                    parts=[
                         Part(
                             root=TextPart(
                                 text="PDF placeholder content (not a real PDF)."
                             )
                         )
                     ],
-                    "metadata": {"media_type": "application/pdf"},
-                }
+                    metadata={"media_type": "application/pdf"},
+                )
             ]
 
         task = Task(
