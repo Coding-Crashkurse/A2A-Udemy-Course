@@ -4,7 +4,7 @@ from pathlib import Path
 import uvicorn
 from dotenv import load_dotenv
 from langchain.agents import create_agent
-from langchain.messages import HumanMessage
+from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
