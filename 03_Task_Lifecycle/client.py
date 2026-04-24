@@ -3,8 +3,10 @@ import asyncio
 import httpx
 import typer
 
-from a2a.client import ClientConfig, ClientFactory, create_text_message_object
+from a2a.client import ClientConfig, create_client
 from a2a.client.card_resolver import A2ACardResolver
+from a2a.helpers import new_text_message
+from a2a.types import Role, SendMessageRequest
 
 BASE_URL = "http://localhost:8001"
 
@@ -17,17 +19,21 @@ def main(text: str = typer.Option("Hello from 03_Tasks!")) -> None:
         async with httpx.AsyncClient() as http:
             card = await A2ACardResolver(http, BASE_URL).get_agent_card()
 
-            client = await ClientFactory.connect(
+            client = await create_client(
                 card,
                 client_config=ClientConfig(
-                    supported_transports=[card.preferred_transport],
+                    supported_protocol_bindings=[
+                        card.supported_interfaces[0].protocol_binding
+                    ],
                     httpx_client=http,
                 ),
             )
 
             try:
-                msg = create_text_message_object(content=text)
-                async for reply in client.send_message(msg):
+                request = SendMessageRequest(
+                    message=new_text_message(text=text, role=Role.ROLE_USER)
+                )
+                async for reply in client.send_message(request):
                     print(reply)
                     break
             finally:

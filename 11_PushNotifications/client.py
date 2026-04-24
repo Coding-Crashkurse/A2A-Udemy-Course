@@ -2,17 +2,17 @@ import asyncio
 import uuid
 
 import httpx
+
+from a2a.client import ClientConfig, create_client
 from a2a.client.card_resolver import A2ACardResolver
-from a2a.client.client import ClientConfig
-from a2a.client.client_factory import ClientFactory
 from a2a.types import (
     Message,
-    MessageSendConfiguration,
     Part,
-    PushNotificationConfig,
     Role,
+    SendMessageConfiguration,
+    SendMessageRequest,
     TaskPushNotificationConfig,
-    TextPart,
+    TaskState,
 )
 
 AGENT_BASE_URL = "http://127.0.0.1:8001"
@@ -23,10 +23,12 @@ async def main() -> None:
     async with httpx.AsyncClient(timeout=30.0) as http:
         card = await A2ACardResolver(http, AGENT_BASE_URL).get_agent_card()
 
-        client = await ClientFactory.connect(
+        client = await create_client(
             card,
             client_config=ClientConfig(
-                supported_transports=[card.preferred_transport],
+                supported_protocol_bindings=[
+                    card.supported_interfaces[0].protocol_binding
+                ],
                 httpx_client=http,
                 streaming=False,
                 polling=False,
@@ -35,34 +37,32 @@ async def main() -> None:
 
         try:
             msg = Message(
-                role=Role.user,
+                role=Role.ROLE_USER,
                 message_id=str(uuid.uuid4()),
-                parts=[Part(root=TextPart(text="Trigger Push Workflow"))],
+                parts=[Part(text="Trigger Push Workflow")],
             )
 
-            # Request wirklich rausschicken (minimal, ohne loop)
-            event_iter = client.send_message(
-                msg,
-                configuration=MessageSendConfiguration(blocking=False),
+            request = SendMessageRequest(
+                message=msg,
+                configuration=SendMessageConfiguration(return_immediately=True),
             )
-            task, _update = await anext(event_iter)
-            await event_iter.aclose()
+            task = None
+            async for reply in client.send_message(request):
+                if reply.HasField("task"):
+                    task = reply.task
+                    break
 
-            # Callback setzen (das ist der entscheidende Teil für Push)
-            push_cfg = PushNotificationConfig(
-                url=WEBHOOK_URL,
-                id=str(uuid.uuid4()),
-                token="demo-token",
-            )
-            await client.set_task_callback(
+            await client.create_task_push_notification_config(
                 TaskPushNotificationConfig(
                     task_id=task.id,
-                    push_notification_config=push_cfg,
+                    id=str(uuid.uuid4()),
+                    url=WEBHOOK_URL,
+                    token="demo-token",
                 )
             )
 
             print(
-                f"taskId={task.id} contextId={task.context_id} state={task.status.state.value}"
+                f"taskId={task.id} contextId={task.context_id} state={TaskState.Name(task.status.state)}"
             )
 
         finally:

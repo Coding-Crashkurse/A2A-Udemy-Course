@@ -3,28 +3,28 @@ import uuid
 from typing import Literal, TypedDict, cast
 
 import uvicorn
+from fastapi import FastAPI
+from google.protobuf.json_format import MessageToDict
+from google.protobuf.struct_pb2 import Struct
 
+from a2a.helpers import new_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.apps import A2ARESTFastAPIApplication
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.routes import create_agent_card_routes, create_rest_routes
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import (
-    AgentCard,
     AgentCapabilities,
+    AgentCard,
+    AgentInterface,
     Artifact,
-    DataPart,
     InvalidParamsError,
     Part,
     Task,
     TaskState,
     TaskStatus,
-    TextPart,
-    TransportProtocol,
 )
-from a2a.utils import new_agent_parts_message
-from a2a.utils.errors import ServerError
-from a2a.utils.parts import get_data_parts
+from a2a.utils import TransportProtocol
 
 
 HOST = "localhost"
@@ -35,9 +35,6 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger("05_StructuredData")
 
 
-# -----------------------------
-# Typed Structured Payloads
-# -----------------------------
 TicketStatus = Literal["open", "closed"]
 TicketPriority = Literal["low", "medium", "high"]
 
@@ -87,23 +84,33 @@ def _filter_tickets(status: TicketStatus) -> list[Ticket]:
     return [t for t in FAKE_TICKETS if t["status"] == status]
 
 
+def get_data_parts(parts):
+    out = []
+    for p in parts:
+        if p.HasField("data"):
+            out.append(MessageToDict(p.data))
+    return out
+
+
+def _struct_from_dict(d: dict) -> Struct:
+    s = Struct()
+    s.update(d)
+    return s
+
+
 class StructuredDataExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         if context.message is None:
-            raise ServerError(InvalidParamsError(message="missing message"))
+            raise InvalidParamsError(message="missing message")
 
         data_parts = get_data_parts(context.message.parts)
         if not data_parts:
-            raise ServerError(
-                InvalidParamsError(message="expected DataPart in message.parts")
-            )
+            raise InvalidParamsError(message="expected DataPart in message.parts")
 
         req = cast(ListTicketsRequest, data_parts[0])
         action = req.get("action", "list_tickets")
         if action != "list_tickets":
-            raise ServerError(
-                InvalidParamsError(message=f"unsupported action: {action}")
-            )
+            raise InvalidParamsError(message=f"unsupported action: {action}")
 
         status = cast(TicketStatus, req.get("status", "open"))
         tickets = _filter_tickets(status)
@@ -115,32 +122,27 @@ class StructuredDataExecutor(AgentExecutor):
             "tickets": tickets,
         }
 
-        agent_msg = new_agent_parts_message(
+        agent_msg = new_message(
             parts=[
-                Part(
-                    root=TextPart(
-                        text=f"Found {len(tickets)} tickets (status={status})."
-                    )
-                ),
-                Part(root=DataPart(data=cast(dict, payload))),
+                Part(text=f"Found {len(tickets)} tickets (status={status})."),
+                Part(data=_struct_from_dict(cast(dict, payload))),
             ],
             context_id=context.context_id,
             task_id=context.task_id,
         )
 
-        # Optional: zusätzlich als Artifact, damit "structured deliverable" sichtbar wird.
         artifact = Artifact(
             artifact_id=str(uuid.uuid4()),
             name="tickets.json",
             description="Ticket list as JSON (DataPart).",
-            parts=[Part(root=DataPart(data=cast(dict, payload)))],
+            parts=[Part(data=_struct_from_dict(cast(dict, payload)))],
             metadata={"media_type": "application/json"},
         )
 
         task = Task(
             id=context.task_id,
             context_id=context.context_id,
-            status=TaskStatus(state=TaskState.completed, message=agent_msg),
+            status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED, message=agent_msg),
             history=[context.message, agent_msg],
             artifacts=[artifact],
             metadata={"section": "05_StructuredData"},
@@ -161,12 +163,14 @@ class StructuredDataExecutor(AgentExecutor):
 card = AgentCard(
     name="05 Structured Data Demo Agent (REST)",
     description="Demonstrates DataPart request/response (structured JSON) + optional DataPart artifact.",
-    url=BASE_URL,
     version="0.5.0-demo",
-    protocol_version="0.3.0",
-    preferred_transport=TransportProtocol.http_json,
+    supported_interfaces=[
+        AgentInterface(
+            url=BASE_URL,
+            protocol_binding=TransportProtocol.HTTP_JSON,
+        ),
+    ],
     capabilities=AgentCapabilities(streaming=False, push_notifications=False),
-    # nice-to-have: signal that JSON is supported
     default_input_modes=["application/json", "text/plain"],
     default_output_modes=["application/json", "text/plain"],
     skills=[],
@@ -175,9 +179,14 @@ card = AgentCard(
 handler = DefaultRequestHandler(
     agent_executor=StructuredDataExecutor(),
     task_store=InMemoryTaskStore(),
+    agent_card=card,
 )
 
-app = A2ARESTFastAPIApplication(agent_card=card, http_handler=handler).build()
+app = FastAPI()
+for route in create_agent_card_routes(agent_card=card):
+    app.router.routes.append(route)
+for route in create_rest_routes(request_handler=handler):
+    app.router.routes.append(route)
 
 if __name__ == "__main__":
     uvicorn.run(app, host=HOST, port=PORT)

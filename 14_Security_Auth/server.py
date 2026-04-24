@@ -1,40 +1,36 @@
-from __future__ import annotations
-
 import asyncio
 import os
 from pathlib import Path
 import time
-import uuid
 from typing import Any, cast
 
 import httpx
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
 from jose import jwt
 from jose.exceptions import JWTError
 
+from a2a.helpers import new_task_from_user_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.apps.rest.rest_adapter import RESTAdapter
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.routes import create_agent_card_routes, create_rest_routes
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
+    AgentInterface,
     AgentSkill,
     HTTPAuthSecurityScheme,
     OpenIdConnectSecurityScheme,
     Part,
-    Role,
+    SecurityRequirement,
     SecurityScheme,
+    StringList,
     TaskState,
-    TextPart,
-    TransportProtocol,
 )
-from a2a.utils.constants import AGENT_CARD_WELL_KNOWN_PATH
-from a2a.utils import new_task
+from a2a.utils import TransportProtocol
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
@@ -71,12 +67,6 @@ async def _get_jwks() -> dict[str, Any]:
 async def require_auth(
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    """
-    Validiert Auth0 RS256 JWT lokal:
-      - Bearer Header vorhanden
-      - kid -> JWKS key
-      - Signature + iss + aud + exp
-    """
     if authorization is None or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Bearer token")
 
@@ -116,32 +106,31 @@ async def require_auth(
 
 class StreamingDemoExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        task = context.current_task or new_task(context.message)
+        task = context.current_task or new_task_from_user_message(context.message)
 
-        # Initial snapshot
         await event_queue.enqueue_event(task)
         updater = TaskUpdater(event_queue, task.id, task.context_id)
 
         await updater.update_status(
-            TaskState.working,
-            updater.new_agent_message([Part(root=TextPart(text="Working 1/3..."))]),
+            TaskState.TASK_STATE_WORKING,
+            updater.new_agent_message([Part(text="Working 1/3...")]),
         )
         await asyncio.sleep(1.0)
 
         await updater.update_status(
-            TaskState.working,
-            updater.new_agent_message([Part(root=TextPart(text="Working 2/3..."))]),
+            TaskState.TASK_STATE_WORKING,
+            updater.new_agent_message([Part(text="Working 2/3...")]),
         )
         await asyncio.sleep(1.0)
 
         await updater.update_status(
-            TaskState.working,
-            updater.new_agent_message([Part(root=TextPart(text="Working 3/3..."))]),
+            TaskState.TASK_STATE_WORKING,
+            updater.new_agent_message([Part(text="Working 3/3...")]),
         )
         await asyncio.sleep(1.0)
 
         await updater.add_artifact(
-            [Part(root=TextPart(text="Demo artifact text ✅"))],
+            [Part(text="Demo artifact text ✅")],
             name="result.txt",
         )
 
@@ -158,12 +147,11 @@ def build_agent_card() -> AgentCard:
     bearer = HTTPAuthSecurityScheme(scheme="Bearer", bearer_format="JWT")
 
     security_schemes: dict[str, SecurityScheme] = {
-        "auth0_oidc": SecurityScheme(root=oidc),
-        "bearer": SecurityScheme(root=bearer),
+        "auth0_oidc": SecurityScheme(open_id_connect_security_scheme=oidc),
+        "bearer": SecurityScheme(http_auth_security_scheme=bearer),
     }
 
-    # Ohne permissions/scopes: Requirement ist nur "bearer"
-    security: list[dict[str, list[str]]] = [{"bearer": []}]
+    security_requirements = [SecurityRequirement(schemes={"bearer": StringList(list=[])})]
 
     skills: list[AgentSkill] = [
         AgentSkill(
@@ -180,17 +168,19 @@ def build_agent_card() -> AgentCard:
     return AgentCard(
         name="Streaming Demo Agent (REST + SSE, Auth0 protected)",
         description="SSE streaming demo protected via Auth0 (RS256 JWT).",
-        url=BASE_URL,
         version="0.1.0-demo",
-        protocol_version="0.3.0",
-        preferred_transport=TransportProtocol.http_json,
-        additional_interfaces=[],
+        supported_interfaces=[
+            AgentInterface(
+                url=BASE_URL,
+                protocol_binding=TransportProtocol.HTTP_JSON,
+            ),
+        ],
         capabilities=AgentCapabilities(streaming=True, push_notifications=False),
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
         skills=skills,
         security_schemes=security_schemes,
-        security=security,
+        security_requirements=security_requirements,
     )
 
 
@@ -199,23 +189,20 @@ def build_app() -> FastAPI:
     handler = DefaultRequestHandler(
         agent_executor=StreamingDemoExecutor(),
         task_store=InMemoryTaskStore(),
+        agent_card=card,
     )
-
-    adapter = RESTAdapter(agent_card=card, http_handler=handler)
 
     app = FastAPI()
 
-    # 1) Protected A2A routes
-    protected = APIRouter(dependencies=[Depends(require_auth)])
-    for (path, method), callback in adapter.routes().items():
-        protected.add_api_route(path, callback, methods=[method])
-    app.include_router(protected)
+    # Public AgentCard routes
+    for route in create_agent_card_routes(agent_card=card):
+        app.router.routes.append(route)
 
-    # 2) Public AgentCard
-    @app.get(AGENT_CARD_WELL_KNOWN_PATH)
-    async def get_agent_card(request: Request) -> JSONResponse:
-        c = await adapter.handle_get_agent_card(request)
-        return JSONResponse(c)
+    # Protected A2A routes
+    protected = APIRouter(dependencies=[Depends(require_auth)])
+    for route in create_rest_routes(request_handler=handler):
+        protected.routes.append(route)
+    app.include_router(protected)
 
     return app
 

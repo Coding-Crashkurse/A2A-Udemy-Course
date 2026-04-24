@@ -5,35 +5,45 @@ from typing import Any
 
 import httpx
 
+from a2a.client import ClientConfig, create_client
 from a2a.client.card_resolver import A2ACardResolver
-from a2a.client.client import ClientConfig
-from a2a.client.client_factory import ClientFactory
-from a2a.types import Message, MessageSendConfiguration, Part, Role, Task, TextPart
-from a2a.utils import get_message_text
+from a2a.helpers import get_message_text
+from a2a.types import (
+    Message,
+    Part,
+    Role,
+    SendMessageConfiguration,
+    SendMessageRequest,
+    Task,
+    TaskState,
+)
 
 BASE_URL = "http://localhost:8001"
 
 
 def fmt_task_line(t: Task) -> str:
-    state = t.status.state.value if t.status and t.status.state else "<?>"
-    msg = get_message_text(t.status.message) if t.status and t.status.message else ""
+    state = TaskState.Name(t.status.state) if t.status else "<?>"
+    msg = get_message_text(t.status.message) if t.status and t.status.HasField("message") else ""
     return f"taskId={t.id} contextId={t.context_id} state={state} statusText={msg!r}"
 
 
 async def create_task_fire_and_forget(client, *, context_id: str, text: str) -> Task:
     msg = Message(
-        role=Role.user,
+        role=Role.ROLE_USER,
         message_id=str(uuid.uuid4()),
         context_id=context_id,
-        parts=[Part(root=TextPart(text=text))],
+        parts=[Part(text=text)],
     )
 
-    it = client.send_message(
-        msg,
-        configuration=MessageSendConfiguration(blocking=False),
+    request = SendMessageRequest(
+        message=msg,
+        configuration=SendMessageConfiguration(return_immediately=True),
     )
-    task, _update = await anext(it)
-    await it.aclose()
+    task: Task | None = None
+    async for reply in client.send_message(request):
+        if reply.HasField("task"):
+            task = reply.task
+            break
     return task
 
 
@@ -57,7 +67,11 @@ async def list_tasks_rest(
     if page_token:
         params["pageToken"] = page_token
 
-    r = await http.get(f"{base_url}/v1/tasks", params=params)
+    r = await http.get(
+        f"{base_url}/v1/tasks",
+        params=params,
+        headers={"A2A-Version": "1.0"},
+    )
     r.raise_for_status()
     data = r.json()
     return data.get("tasks", []), data.get("nextPageToken")
@@ -68,7 +82,7 @@ def print_list(title: str, tasks: list[dict[str, Any]], next_token: str | None) 
     print(f"count={len(tasks)} nextPageToken={next_token!r}")
     for t in tasks:
         tid = t.get("id")
-        cid = t.get("contextId")
+        cid = t.get("context_id") or t.get("contextId")
         state = (t.get("status") or {}).get("state")
 
         artifacts = t.get("artifacts")
@@ -86,10 +100,12 @@ async def main() -> None:
     async with httpx.AsyncClient(timeout=None) as http:
         card = await A2ACardResolver(http, BASE_URL).get_agent_card()
 
-        client = await ClientFactory.connect(
+        client = await create_client(
             card,
             client_config=ClientConfig(
-                supported_transports=[card.preferred_transport],
+                supported_protocol_bindings=[
+                    card.supported_interfaces[0].protocol_binding
+                ],
                 httpx_client=http,
                 streaming=False,
                 polling=False,
@@ -97,7 +113,6 @@ async def main() -> None:
         )
 
         try:
-            # 1) Drei Tasks anlegen (ohne Streaming, fire&forget)
             created: list[Task] = []
             for i in range(1, 4):
                 t = await create_task_fire_and_forget(
@@ -108,7 +123,6 @@ async def main() -> None:
                 created.append(t)
                 print(f"\ncreated[{i}]: {fmt_task_line(t)}")
 
-            # 2) Sofort listen (Pagination Demo: pageSize=2)
             page1, next1 = await list_tasks_rest(
                 http,
                 base_url=BASE_URL,
@@ -132,7 +146,6 @@ async def main() -> None:
                 )
                 print_list("LIST (immediately, page 2)", page2, next2)
 
-            # 3) Kurz warten und nur working filtern
             await asyncio.sleep(1.0)
             working, next_w = await list_tasks_rest(
                 http,
@@ -145,7 +158,6 @@ async def main() -> None:
             )
             print_list("LIST (filter status=working)", working, next_w)
 
-            # 4) Warten bis fertig und completed + artifacts anzeigen
             print("\nwaiting ~35s so tasks can complete...")
             t0 = time.perf_counter()
             await asyncio.sleep(35.0)

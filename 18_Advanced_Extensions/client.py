@@ -3,11 +3,13 @@ from uuid import uuid4
 
 import httpx
 import typer
+from google.protobuf.struct_pb2 import Struct
 
-from a2a.client import ClientConfig, ClientFactory
+from a2a.client import ClientConfig, create_client
 from a2a.client.card_resolver import A2ACardResolver
-from a2a.types import AgentCard, Message, Part, Role, TextPart, TransportProtocol
-from a2a.utils import get_message_text
+from a2a.helpers import get_message_text
+from a2a.types import AgentCard, Message, Part, Role, SendMessageRequest
+from a2a.utils import TransportProtocol
 
 BASE_URL = "http://localhost:8001"
 LANG_EXTENSION_URI = "https://example.com/extensions/language/v1"
@@ -16,8 +18,13 @@ app = typer.Typer(add_completion=False)
 
 
 def print_language_extension_summary(card: AgentCard) -> None:
-    ext = next(e for e in (card.capabilities.extensions or []) if e.uri == LANG_EXTENSION_URI)
-    params = ext.params or {}
+    ext = next(
+        e for e in (card.capabilities.extensions or []) if e.uri == LANG_EXTENSION_URI
+    )
+    params = {}
+    if ext.HasField("params"):
+        from google.protobuf.json_format import MessageToDict
+        params = MessageToDict(ext.params)
     print(
         f"Language extension: supported={params.get('supportedLanguages')} "
         f"default={params.get('defaultLanguage')}"
@@ -25,12 +32,14 @@ def print_language_extension_summary(card: AgentCard) -> None:
 
 
 def build_message(text: str, language: str) -> Message:
+    metadata = Struct()
+    metadata.update({LANG_EXTENSION_URI: {"language": language}})
     return Message(
-        role=Role.user,
+        role=Role.ROLE_USER,
         message_id=str(uuid4()),
-        parts=[Part(root=TextPart(text=text))],
+        parts=[Part(text=text)],
         extensions=[LANG_EXTENSION_URI],
-        metadata={LANG_EXTENSION_URI: {"language": language}},
+        metadata=metadata,
     )
 
 
@@ -44,10 +53,10 @@ def main(
             card = await A2ACardResolver(http, BASE_URL).get_agent_card()
             print_language_extension_summary(card)
 
-            client = await ClientFactory.connect(
+            client = await create_client(
                 card,
                 client_config=ClientConfig(
-                    supported_transports=[TransportProtocol.http_json],
+                    supported_protocol_bindings=[TransportProtocol.HTTP_JSON],
                     httpx_client=http,
                     streaming=False,
                     polling=False,
@@ -56,11 +65,12 @@ def main(
 
             try:
                 msg = build_message(text=text, language=lang)
-                it = client.send_message(msg)
-                task, _update = await anext(it)
-                await it.aclose()
-
-                print(get_message_text(task.status.message))
+                request = SendMessageRequest(message=msg)
+                async for reply in client.send_message(request):
+                    if reply.HasField("task"):
+                        if reply.task.status.HasField("message"):
+                            print(get_message_text(reply.task.status.message))
+                        break
             finally:
                 await client.close()
 

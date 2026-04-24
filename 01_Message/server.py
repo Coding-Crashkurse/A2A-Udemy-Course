@@ -1,20 +1,23 @@
-import uuid
 import logging
 import uvicorn
-from a2a.server.apps import A2AFastAPIApplication
+from fastapi import FastAPI
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
-from a2a.types import AgentCard, AgentCapabilities, Message, Role, Part, TextPart
+from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
+from a2a.helpers import new_text_message
+from a2a.types import AgentCard, AgentCapabilities, AgentInterface
 
-# Configure logging to see exactly what happens
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("EchoAgent")
+
+
+RPC_URL = "/"
 
 
 class EchoExecutor(AgentExecutor):
@@ -29,12 +32,10 @@ class EchoExecutor(AgentExecutor):
 
         response_text = f"Echo: {user_text}"
 
-        response_message = Message(
-            role=Role.agent,
-            message_id=str(uuid.uuid4()),
+        response_message = new_text_message(
+            text=response_text,
             context_id=context.context_id,
             task_id=context.task_id,
-            parts=[Part(root=TextPart(text=response_text))],
         )
 
         logger.info(f">>> [3] RESPONSE CREATED: '{response_text}'")
@@ -51,8 +52,12 @@ minimal_card = AgentCard(
     name="Minimal Echo Agent",
     description="A simple echo service",
     version="0.1.0",
-    url="http://localhost:8000/a2a",
-    preferred_transport="JSONRPC",
+    supported_interfaces=[
+        AgentInterface(
+            url="http://localhost:8000/",
+            protocol_binding="JSONRPC",
+        ),
+    ],
     capabilities=AgentCapabilities(streaming=False, push_notifications=False),
     default_input_modes=["text/plain"],
     default_output_modes=["text/plain"],
@@ -62,13 +67,17 @@ minimal_card = AgentCard(
 task_store = InMemoryTaskStore()
 executor = EchoExecutor()
 
-request_handler = DefaultRequestHandler(agent_executor=executor, task_store=task_store)
-
-app_builder = A2AFastAPIApplication(
-    agent_card=minimal_card, http_handler=request_handler
+request_handler = DefaultRequestHandler(
+    agent_executor=executor,
+    task_store=task_store,
+    agent_card=minimal_card,
 )
 
-app = app_builder.build(rpc_url="/")
+app = FastAPI()
+for route in create_agent_card_routes(agent_card=minimal_card):
+    app.router.routes.append(route)
+for route in create_jsonrpc_routes(request_handler=request_handler, rpc_url=RPC_URL):
+    app.router.routes.append(route)
 
 if __name__ == "__main__":
     logger.info("--- Starting A2A Server on Port 8000 ---")

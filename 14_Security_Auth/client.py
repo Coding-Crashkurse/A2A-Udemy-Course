@@ -1,27 +1,23 @@
-from __future__ import annotations
-
 import asyncio
+import json
 import os
 from pathlib import Path
-import uuid
 from typing import Any, cast
 
 import httpx
 import typer
 from dotenv import load_dotenv
 
-from a2a.client import ClientConfig, ClientFactory, create_text_message_object
+from a2a.client import ClientConfig, create_client
 from a2a.client.card_resolver import A2ACardResolver
+from a2a.helpers import get_artifact_text, get_message_text, new_text_message
 from a2a.types import (
     AgentCard,
-    Message,
-    Part,
-    Task,
-    TaskArtifactUpdateEvent,
-    TaskStatusUpdateEvent,
-    TransportProtocol,
+    Role,
+    SendMessageRequest,
+    TaskState,
 )
-import json
+from a2a.utils import TransportProtocol
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
@@ -38,11 +34,6 @@ AGENT_CARD_URL: str = f"{A2A_BASE_URL}/.well-known/agent-card.json"
 STREAM_URL: str = f"{A2A_BASE_URL}/v1/message:stream"
 
 
-def parts_text(parts: list[Part]) -> str:
-    # strikt: wir nehmen TextPart (happy path)
-    return " ".join(p.root.text for p in parts).strip()
-
-
 async def fetch_token(http: httpx.AsyncClient) -> str:
     payload: dict[str, Any] = {
         "grant_type": "client_credentials",
@@ -54,7 +45,6 @@ async def fetch_token(http: httpx.AsyncClient) -> str:
     r = await http.post(TOKEN_URL, json=payload)
 
     if r.status_code != 200:
-        # Auth0-Fehler sichtbar machen
         print(f"AUTH0 TOKEN ERROR -> http={r.status_code}")
         ct = r.headers.get("content-type", "")
         if "application/json" in ct:
@@ -69,7 +59,7 @@ async def fetch_token(http: httpx.AsyncClient) -> str:
 
 def build_config(http: httpx.AsyncClient) -> ClientConfig:
     return ClientConfig(
-        supported_transports=[TransportProtocol.http_json],
+        supported_protocol_bindings=[TransportProtocol.HTTP_JSON],
         httpx_client=http,
         streaming=True,
         polling=False,
@@ -77,10 +67,14 @@ def build_config(http: httpx.AsyncClient) -> ClientConfig:
 
 
 async def demo_fail_without_token(http: httpx.AsyncClient, text: str) -> None:
-    # Wir demonstrieren 401 sauber über einen direkten HTTP Call (kein SDK).
-    msg = create_text_message_object(content=text)
-    body = {"message": msg.model_dump(mode="json", by_alias=True, exclude_none=True)}
-    r = await http.post(STREAM_URL, json=body)
+    body = {
+        "message": {
+            "role": "ROLE_USER",
+            "message_id": "demo-msg",
+            "parts": [{"text": text}],
+        }
+    }
+    r = await http.post(STREAM_URL, json=body, headers={"A2A-Version": "1.0"})
     print(f"WITHOUT TOKEN -> http={r.status_code}")
     print(r.text[:300])
 
@@ -90,33 +84,29 @@ async def demo_success_with_token(http: httpx.AsyncClient, text: str) -> None:
     http.headers["Authorization"] = f"Bearer {token}"
 
     card: AgentCard = await A2ACardResolver(http, A2A_BASE_URL).get_agent_card()
-    client = await ClientFactory.connect(card, client_config=build_config(http))
+    client = await create_client(card, client_config=build_config(http))
 
     try:
-        msg = create_text_message_object(content=text)
+        request = SendMessageRequest(
+            message=new_text_message(text=text, role=Role.ROLE_USER)
+        )
 
-        async for task, update in client.send_message(msg):
-            # update kann None sein (Snapshot) oder Status/Artifact-Event.
-            line = f"state={task.status.state.value}"
-
-            if update is None:
+        async for reply in client.send_message(request):
+            if reply.HasField("task"):
+                t = reply.task
+                print(f"state={TaskState.Name(t.status.state)}")
+            elif reply.HasField("status_update"):
+                su = reply.status_update
+                line = f"state={TaskState.Name(su.status.state)}"
+                if su.status.HasField("message"):
+                    line += f" text={get_message_text(su.status.message)}"
                 print(line)
-                continue
-
-            # Kein isinstance: wir nehmen das `kind` Discriminator-Feld.
-            kind = update.kind
-            if kind == "status-update":
-                su = cast(TaskStatusUpdateEvent, update)
-                if su.status.message is not None:
-                    line += f" text={parts_text(su.status.message.parts)}"
-                print(line)
-                continue
-
-            if kind == "artifact-update":
-                au = cast(TaskArtifactUpdateEvent, update)
-                line += f" artifact={au.artifact.name} artifactText={parts_text(au.artifact.parts)}"
-                print(line)
-                continue
+            elif reply.HasField("artifact_update"):
+                au = reply.artifact_update
+                print(
+                    f"artifact={au.artifact.name}"
+                    f" artifactText={get_artifact_text(au.artifact)}"
+                )
 
     finally:
         await client.close()
@@ -128,7 +118,6 @@ def main(
 ) -> None:
     async def _run() -> None:
         async with httpx.AsyncClient(timeout=None) as http:
-            # AgentCard ist öffentlich erreichbar
             r = await http.get(AGENT_CARD_URL)
             r.raise_for_status()
 

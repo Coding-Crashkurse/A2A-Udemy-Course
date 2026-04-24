@@ -3,11 +3,11 @@ import asyncio
 import httpx
 import typer
 
-from a2a.client import ClientConfig, create_text_message_object
+from a2a.client import ClientConfig, create_client
 from a2a.client.card_resolver import A2ACardResolver
-from a2a.client.client_factory import ClientFactory
-from a2a.types import TransportProtocol
-from a2a.utils import get_message_text
+from a2a.helpers import get_message_text, new_text_message
+from a2a.types import Role, SendMessageRequest
+from a2a.utils import TransportProtocol
 
 BASE_URL = "http://localhost:8001"
 
@@ -21,24 +21,32 @@ def main(text: str = typer.Option("Explain the offside rule in soccer briefly.")
         async with httpx.AsyncClient(timeout=timeout) as http:
             card = await A2ACardResolver(http, BASE_URL).get_agent_card()
 
-            client = ClientFactory(
-                ClientConfig(
+            client = await create_client(
+                card,
+                client_config=ClientConfig(
                     httpx_client=http,
-                    supported_transports=[TransportProtocol.http_json],
+                    supported_protocol_bindings=[TransportProtocol.HTTP_JSON],
                     streaming=False,
                     polling=False,
-                )
-            ).create(card)
+                ),
+            )
 
             try:
-                msg = create_text_message_object(content=text)
+                request = SendMessageRequest(
+                    message=new_text_message(text=text, role=Role.ROLE_USER)
+                )
+                last_text = ""
+                async for reply in client.send_message(request):
+                    if reply.HasField("task"):
+                        if reply.task.status.HasField("message"):
+                            last_text = get_message_text(reply.task.status.message)
+                    elif reply.HasField("status_update"):
+                        if reply.status_update.status.HasField("message"):
+                            last_text = get_message_text(
+                                reply.status_update.status.message
+                            )
 
-                events = client.send_message(msg)
-                task, _ = await anext(events)
-                async for task, _ in events:
-                    pass
-
-                print(get_message_text(task.status.message))
+                print(last_text)
             finally:
                 await client.close()
 

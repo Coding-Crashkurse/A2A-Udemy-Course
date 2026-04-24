@@ -1,31 +1,32 @@
-from __future__ import annotations
-
 import os
 from pathlib import Path
 
 import httpx
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import Request
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from google.protobuf.json_format import MessageToDict
 from jose import jwt
 from jose.exceptions import JWTError
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.apps import A2ARESTFastAPIApplication
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.routes import create_agent_card_routes, create_rest_routes
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
+    AgentInterface,
     AgentSkill,
     HTTPAuthSecurityScheme,
+    SecurityRequirement,
     SecurityScheme,
-    TransportProtocol,
+    StringList,
     UnsupportedOperationError,
 )
-from a2a.utils.errors import ServerError
+from a2a.utils import TransportProtocol
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
@@ -37,7 +38,6 @@ ISSUER = f"https://{AUTH0_DOMAIN}/"
 JWKS_URL = f"{ISSUER}.well-known/jwks.json"
 JWT_ALGORITHMS = ["RS256"]
 
-# v0.3.0 Extended Card Endpoint (SDK): GET /v1/card
 EXTENDED_CARD_PATH = "/v1/card"
 
 
@@ -71,10 +71,12 @@ async def verify_bearer_or_raise(authorization: str | None):
         raise PermissionError("Invalid token") from e
 
 
-def _security_schemes() -> tuple[dict[str, SecurityScheme], list[dict[str, list[str]]]]:
+def _security_schemes() -> tuple[dict[str, SecurityScheme], list[SecurityRequirement]]:
     bearer = HTTPAuthSecurityScheme(scheme="Bearer", bearer_format="JWT")
-    schemes: dict[str, SecurityScheme] = {"bearer": SecurityScheme(root=bearer)}
-    security: list[dict[str, list[str]]] = [{"bearer": []}]
+    schemes: dict[str, SecurityScheme] = {
+        "bearer": SecurityScheme(http_auth_security_scheme=bearer)
+    }
+    security = [SecurityRequirement(schemes={"bearer": StringList(list=[])})]
     return schemes, security
 
 
@@ -84,12 +86,13 @@ def build_public_agent_card() -> AgentCard:
     return AgentCard(
         name="AgentCard Demo (Public/Private)",
         description="Public Agent Card is accessible without auth. Extended card requires Bearer JWT.",
-        url=BASE_URL,
         version="0.1.0-demo",
-        protocol_version="0.3.0",
-        preferred_transport=TransportProtocol.http_json,
-        additional_interfaces=[],
-        capabilities=AgentCapabilities(streaming=False, push_notifications=False),
+        supported_interfaces=[
+            AgentInterface(
+                url=BASE_URL,
+                protocol_binding=TransportProtocol.HTTP_JSON,
+            ),
+        ],
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
         skills=[
@@ -101,8 +104,10 @@ def build_public_agent_card() -> AgentCard:
             )
         ],
         security_schemes=schemes,
-        security=security,
-        supports_authenticated_extended_card=True,
+        security_requirements=security,
+        capabilities=AgentCapabilities(
+            streaming=False, push_notifications=False, extended_agent_card=True
+        ),
     )
 
 
@@ -112,12 +117,13 @@ def build_private_agent_card() -> AgentCard:
     return AgentCard(
         name="AgentCard Demo (Extended)",
         description="Authenticated extended agent card (Bearer JWT).",
-        url=BASE_URL,
         version="0.1.0-demo",
-        protocol_version="0.3.0",
-        preferred_transport=TransportProtocol.http_json,
-        additional_interfaces=[],
-        capabilities=AgentCapabilities(streaming=False, push_notifications=False),
+        supported_interfaces=[
+            AgentInterface(
+                url=BASE_URL,
+                protocol_binding=TransportProtocol.HTTP_JSON,
+            ),
+        ],
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
         skills=[
@@ -135,16 +141,16 @@ def build_private_agent_card() -> AgentCard:
             ),
         ],
         security_schemes=schemes,
-        security=security,
-        supports_authenticated_extended_card=True,
+        security_requirements=security,
+        capabilities=AgentCapabilities(
+            streaming=False, push_notifications=False, extended_agent_card=True
+        ),
     )
 
 
 class CardOnlyExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        raise ServerError(
-            UnsupportedOperationError(message="This demo only serves agent cards")
-        )
+        raise UnsupportedOperationError(message="This demo only serves agent cards")
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         return
@@ -156,13 +162,21 @@ private_card = build_private_agent_card()
 handler = DefaultRequestHandler(
     agent_executor=CardOnlyExecutor(),
     task_store=InMemoryTaskStore(),
+    agent_card=public_card,
 )
 
-app = A2ARESTFastAPIApplication(
-    agent_card=public_card,
-    extended_agent_card=private_card,
-    http_handler=handler,
-).build()
+app = FastAPI()
+for route in create_agent_card_routes(agent_card=public_card):
+    app.router.routes.append(route)
+for route in create_rest_routes(request_handler=handler):
+    app.router.routes.append(route)
+
+
+@app.get(EXTENDED_CARD_PATH)
+async def get_extended_agent_card() -> JSONResponse:
+    return JSONResponse(
+        MessageToDict(private_card, preserving_proto_field_name=True)
+    )
 
 
 @app.middleware("http")

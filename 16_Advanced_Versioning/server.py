@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -10,24 +8,25 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from google.protobuf.json_format import MessageToDict
 from jose import jwt
 from jose.exceptions import JWTError
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.apps import A2ARESTFastAPIApplication
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.routes import create_agent_card_routes, create_rest_routes
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
+    AgentInterface,
     AgentSkill,
     HTTPAuthSecurityScheme,
     SecurityScheme,
-    TransportProtocol,
     UnsupportedOperationError,
 )
-from a2a.utils.errors import ServerError
+from a2a.utils import TransportProtocol
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 cli = typer.Typer(add_completion=False)
@@ -132,18 +131,19 @@ def build_public_agent_card(
     *,
     base_url: str,
     agent_version: str,
-    advertised_protocol: str,
     label: str,
 ) -> AgentCard:
     schemes, security = _security_schemes()
     return AgentCard(
         name=f"AgentCard Versioning Demo ({label})",
         description=f"Public card open. Extended card protected. ({label})",
-        url=base_url,
         version=agent_version,
-        protocol_version=advertised_protocol,
-        preferred_transport=TransportProtocol.http_json,
-        additional_interfaces=[],
+        supported_interfaces=[
+            AgentInterface(
+                url=base_url,
+                protocol_binding=TransportProtocol.HTTP_JSON,
+            ),
+        ],
         capabilities=AgentCapabilities(streaming=False, push_notifications=False),
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
@@ -165,18 +165,19 @@ def build_private_agent_card(
     *,
     base_url: str,
     agent_version: str,
-    protocol_version: str,
     label: str,
 ) -> AgentCard:
     schemes, security = _security_schemes()
     return AgentCard(
         name=f"AgentCard Versioning Demo (Extended, {label})",
         description=f"Extended agent card. Requires Bearer JWT. ({label})",
-        url=base_url,
         version=agent_version,
-        protocol_version=protocol_version,
-        preferred_transport=TransportProtocol.http_json,
-        additional_interfaces=[],
+        supported_interfaces=[
+            AgentInterface(
+                url=base_url,
+                protocol_binding=TransportProtocol.HTTP_JSON,
+            ),
+        ],
         capabilities=AgentCapabilities(streaming=False, push_notifications=False),
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
@@ -202,9 +203,7 @@ def build_private_agent_card(
 
 class CardOnlyExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        raise ServerError(
-            UnsupportedOperationError(message="This demo only serves agent cards")
-        )
+        raise UnsupportedOperationError(message="This demo only serves agent cards")
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         return
@@ -215,46 +214,41 @@ def build_app(*, mode: Mode, port: int, agent_version: str, label: str) -> FastA
 
     if mode == "legacy":
         supported_versions = ["0.3"]
-        advertised = "0.3"
     else:
         supported_versions = ["1.0"]
-        advertised = "1.0"
 
     public_card = build_public_agent_card(
         base_url=base_url,
         agent_version=agent_version,
-        advertised_protocol=advertised,
         label=label,
     )
     private_card = build_private_agent_card(
         base_url=base_url,
         agent_version=agent_version,
-        protocol_version=advertised,
         label=label,
     )
 
     handler = DefaultRequestHandler(
         agent_executor=CardOnlyExecutor(),
         task_store=InMemoryTaskStore(),
+        agent_card=public_card,
     )
 
-    if mode == "legacy":
-        app = A2ARESTFastAPIApplication(
-            agent_card=public_card,
-            extended_agent_card=private_card,
-            http_handler=handler,
-        ).build()
-    else:
-        app = A2ARESTFastAPIApplication(
-            agent_card=public_card,
-            http_handler=handler,
-        ).build()
+    app = FastAPI()
+    for route in create_agent_card_routes(agent_card=public_card):
+        app.router.routes.append(route)
+    for route in create_rest_routes(request_handler=handler):
+        app.router.routes.append(route)
 
-        @app.get(EXTENDED_CARD_PATH_V10)
-        async def get_extended_agent_card_v1(request: Request) -> JSONResponse:
-            return JSONResponse(
-                private_card.model_dump(mode="json", by_alias=True, exclude_none=True)
-            )
+    extended_card_path = (
+        EXTENDED_CARD_PATH_V03 if mode == "legacy" else EXTENDED_CARD_PATH_V10
+    )
+
+    @app.get(extended_card_path)
+    async def get_extended_agent_card() -> JSONResponse:
+        return JSONResponse(
+            MessageToDict(private_card, preserving_proto_field_name=True)
+        )
 
     @app.middleware("http")
     async def gate(request: Request, call_next):

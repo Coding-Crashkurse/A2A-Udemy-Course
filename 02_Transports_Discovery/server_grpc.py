@@ -2,13 +2,14 @@ import asyncio
 import logging
 
 from a2a.server.request_handlers import GrpcHandler
-from a2a.types import TransportProtocol
+from a2a.types import AgentInterface
+from a2a.utils import TransportProtocol
 
 from shared import build_agent_card, create_request_handler
 
 try:
     import grpc
-    from a2a.grpc import a2a_pb2_grpc
+    from a2a.types import a2a_pb2_grpc
 except ImportError as e:
     raise SystemExit(
         'gRPC dependencies are required. Install with: pip install "a2a-sdk[grpc]"'
@@ -19,11 +20,13 @@ GRPC_PORT = 50051
 
 async def serve() -> None:
     agent_card = build_agent_card(
-        base_url=f"localhost:{GRPC_PORT}",
-        preferred_transport=TransportProtocol.grpc,
+        AgentInterface(
+            url=f"localhost:{GRPC_PORT}",
+            protocol_binding=TransportProtocol.GRPC,
+        ),
     )
-    handler = create_request_handler()
-    grpc_handler = GrpcHandler(agent_card=agent_card, request_handler=handler)
+    handler = create_request_handler(agent_card=agent_card)
+    grpc_handler = GrpcHandler(request_handler=handler)
 
     server = grpc.aio.server()
     a2a_pb2_grpc.add_A2AServiceServicer_to_server(grpc_handler, server)

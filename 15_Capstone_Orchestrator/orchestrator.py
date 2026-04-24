@@ -6,21 +6,34 @@ from typing import Literal
 import httpx
 import uvicorn
 from dotenv import load_dotenv
+from fastapi import FastAPI
+from google.protobuf.json_format import MessageToDict
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
-from a2a.client import ClientConfig, create_text_message_object
+from a2a.client import ClientConfig, create_client
 from a2a.client.card_resolver import A2ACardResolver
-from a2a.client.client_factory import ClientFactory
+from a2a.helpers import (
+    get_message_text,
+    new_task_from_user_message,
+    new_text_message,
+)
 from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.apps import A2ARESTFastAPIApplication
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.routes import create_agent_card_routes, create_rest_routes
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
-from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TransportProtocol
-from a2a.utils import get_message_text, new_agent_text_message, new_task
+from a2a.types import (
+    AgentCapabilities,
+    AgentCard,
+    AgentInterface,
+    AgentSkill,
+    Role,
+    SendMessageRequest,
+)
+from a2a.utils import TransportProtocol
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
@@ -63,6 +76,20 @@ class FinalAnswer(BaseModel):
     )
 
 
+def _card_to_json(card: AgentCard) -> str:
+    return json.dumps(
+        MessageToDict(card, preserving_proto_field_name=True),
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+def _card_url(card: AgentCard) -> str:
+    if card.supported_interfaces:
+        return card.supported_interfaces[0].url
+    return ""
+
+
 class OrchestratorExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         timeout = httpx.Timeout(60.0, connect=10.0)
@@ -71,34 +98,28 @@ class OrchestratorExecutor(AgentExecutor):
             football_card = await A2ACardResolver(http, FOOTBALL_AGENT_URL).get_agent_card()
             general_card = await A2ACardResolver(http, GENERAL_AGENT_URL).get_agent_card()
 
-            football_card_json = json.dumps(
-                football_card.model_dump(exclude_none=True),
-                ensure_ascii=False,
-                indent=2,
-            )
-            general_card_json = json.dumps(
-                general_card.model_dump(exclude_none=True),
-                ensure_ascii=False,
-                indent=2,
-            )
+            football_card_json = _card_to_json(football_card)
+            general_card_json = _card_to_json(general_card)
 
-            football_client = ClientFactory(
-                ClientConfig(
+            football_client = await create_client(
+                football_card,
+                client_config=ClientConfig(
                     httpx_client=http,
-                    supported_transports=[TransportProtocol.http_json],
-                    streaming=True,   # football can stream
+                    supported_protocol_bindings=[TransportProtocol.HTTP_JSON],
+                    streaming=True,
                     polling=False,
-                )
-            ).create(football_card)
+                ),
+            )
 
-            general_client = ClientFactory(
-                ClientConfig(
+            general_client = await create_client(
+                general_card,
+                client_config=ClientConfig(
                     httpx_client=http,
-                    supported_transports=[TransportProtocol.http_json],
+                    supported_protocol_bindings=[TransportProtocol.HTTP_JSON],
                     streaming=False,
                     polling=False,
-                )
-            ).create(general_card)
+                ),
+            )
 
             try:
                 router = create_agent(
@@ -128,14 +149,21 @@ class OrchestratorExecutor(AgentExecutor):
                 used_card = football_card if decision.target == "football" else general_card
                 used_client = football_client if decision.target == "football" else general_client
 
-                outbound = create_text_message_object(content=decision.query)
+                outbound = new_text_message(text=decision.query, role=Role.ROLE_USER)
 
-                events = used_client.send_message(outbound)
-                remote_task, _ = await anext(events)
-                async for remote_task, _ in events:
-                    pass
-
-                remote_text = get_message_text(remote_task.status.message)
+                request = SendMessageRequest(message=outbound)
+                remote_text = ""
+                async for reply in used_client.send_message(request):
+                    if reply.HasField("task"):
+                        if reply.task.status.HasField("message"):
+                            remote_text = get_message_text(reply.task.status.message)
+                    elif reply.HasField("status_update"):
+                        if reply.status_update.status.HasField("message"):
+                            remote_text = get_message_text(
+                                reply.status_update.status.message
+                            )
+                    elif reply.HasField("message"):
+                        remote_text = get_message_text(reply.message)
 
                 finalizer = create_agent(
                     model=FINALIZER_MODEL,
@@ -156,7 +184,7 @@ class OrchestratorExecutor(AgentExecutor):
 
                 finalizer_input = (
                     f'AGENT_USED_NAME: "{used_card.name}"\n'
-                    f"AGENT_USED_URL: {used_card.url}\n\n"
+                    f"AGENT_USED_URL: {_card_url(used_card)}\n\n"
                     "REMOTE_AGENT_ANSWER:\n"
                     f"{remote_text}\n"
                 )
@@ -166,13 +194,13 @@ class OrchestratorExecutor(AgentExecutor):
                 )
                 final: FinalAnswer = finalizer_result["structured_response"]
 
-                task = new_task(context.message)
+                task = new_task_from_user_message(context.message)
                 await event_queue.enqueue_event(task)
 
                 updater = TaskUpdater(event_queue, task.id, task.context_id)
                 await updater.complete(
-                    new_agent_text_message(
-                        final.answer,
+                    new_text_message(
+                        text=final.answer,
                         context_id=task.context_id,
                         task_id=task.id,
                     )
@@ -200,10 +228,13 @@ agent_card = AgentCard(
         "Orchestrator agent: never answers questions directly. "
         "It delegates to sub-agents and explicitly states which agent provided the information."
     ),
-    url=BASE_URL,
     version="0.1.0-demo",
-    protocol_version="0.3.0",
-    preferred_transport=TransportProtocol.http_json,
+    supported_interfaces=[
+        AgentInterface(
+            url=BASE_URL,
+            protocol_binding=TransportProtocol.HTTP_JSON,
+        ),
+    ],
     capabilities=AgentCapabilities(streaming=False, push_notifications=False),
     default_input_modes=["text/plain"],
     default_output_modes=["text/plain"],
@@ -226,9 +257,14 @@ agent_card = AgentCard(
 handler = DefaultRequestHandler(
     agent_executor=OrchestratorExecutor(),
     task_store=InMemoryTaskStore(),
+    agent_card=agent_card,
 )
 
-app = A2ARESTFastAPIApplication(agent_card=agent_card, http_handler=handler).build()
+app = FastAPI()
+for route in create_agent_card_routes(agent_card=agent_card):
+    app.router.routes.append(route)
+for route in create_rest_routes(request_handler=handler):
+    app.router.routes.append(route)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8001)

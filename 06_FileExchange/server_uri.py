@@ -6,25 +6,23 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import Response
 
+from a2a.helpers import new_text_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.apps import A2ARESTFastAPIApplication
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.routes import create_agent_card_routes, create_rest_routes
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
+    AgentInterface,
     Artifact,
-    FilePart,
-    FileWithUri,
     Part,
     Task,
     TaskState,
     TaskStatus,
-    TransportProtocol,
 )
-from a2a.utils import new_agent_text_message
-from a2a.utils.parts import get_file_parts
+from a2a.utils import TransportProtocol
 
 HOST = "localhost"
 PORT = 8001
@@ -43,30 +41,36 @@ def update_text(raw: bytes) -> bytes:
     return raw + b"\nI was updated\n"
 
 
+def _first_file_part(parts):
+    for p in parts:
+        if p.HasField("url") or p.HasField("raw"):
+            return p
+    raise ValueError("no file part found")
+
+
 class UriUploadExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        file_in = get_file_parts(context.message.parts)[0]
-        file_in = FileWithUri(**file_in.model_dump())
+        file_in = _first_file_part(context.message.parts)
 
         async with httpx.AsyncClient(timeout=10.0) as http:
-            r = await http.get(file_in.uri)
+            r = await http.get(file_in.url)
             r.raise_for_status()
             store.content = update_text(r.content)
-
-        file_out = FileWithUri(
-            uri=f"{BASE_URL}/download.txt",
-            name="download.txt",
-            mime_type="text/plain",
-        )
 
         artifact = Artifact(
             artifact_id=str(uuid.uuid4()),
             name="download.txt",
-            parts=[Part(root=FilePart(file=file_out))],
+            parts=[
+                Part(
+                    url=f"{BASE_URL}/download.txt",
+                    filename="download.txt",
+                    media_type="text/plain",
+                )
+            ],
         )
 
-        done_msg = new_agent_text_message(
-            "Done.",
+        done_msg = new_text_message(
+            text="Done.",
             context_id=context.context_id,
             task_id=context.task_id,
         )
@@ -74,7 +78,7 @@ class UriUploadExecutor(AgentExecutor):
         task = Task(
             id=context.task_id,
             context_id=context.context_id,
-            status=TaskStatus(state=TaskState.completed, message=done_msg),
+            status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED, message=done_msg),
             history=[context.message, done_msg],
             artifacts=[artifact],
         )
@@ -87,11 +91,14 @@ class UriUploadExecutor(AgentExecutor):
 
 card = AgentCard(
     name="06 FileExchange URI Fetch (REST)",
-    description="Client sends fileWithUri, agent fetches and returns fileWithUri for download.",
-    url=BASE_URL,
+    description="Client sends file URI, agent fetches and returns file URI for download.",
     version="0.6.0-demo",
-    protocol_version="0.3.0",
-    preferred_transport=TransportProtocol.http_json,
+    supported_interfaces=[
+        AgentInterface(
+            url=BASE_URL,
+            protocol_binding=TransportProtocol.HTTP_JSON,
+        ),
+    ],
     capabilities=AgentCapabilities(streaming=False, push_notifications=False),
     default_input_modes=["text/plain"],
     default_output_modes=["text/plain"],
@@ -101,9 +108,14 @@ card = AgentCard(
 handler = DefaultRequestHandler(
     agent_executor=UriUploadExecutor(),
     task_store=InMemoryTaskStore(),
+    agent_card=card,
 )
 
-app: FastAPI = A2ARESTFastAPIApplication(agent_card=card, http_handler=handler).build()
+app = FastAPI()
+for route in create_agent_card_routes(agent_card=card):
+    app.router.routes.append(route)
+for route in create_rest_routes(request_handler=handler):
+    app.router.routes.append(route)
 
 
 @app.get("/download.txt")

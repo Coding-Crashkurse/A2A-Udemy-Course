@@ -7,11 +7,9 @@ from pathlib import Path
 
 import httpx
 
+from a2a.client import ClientConfig, create_client
 from a2a.client.card_resolver import A2ACardResolver
-from a2a.client.client import ClientConfig
-from a2a.client.client_factory import ClientFactory
-from a2a.types import FilePart, FileWithUri, Message, Part, Role
-from a2a.utils.parts import get_file_parts
+from a2a.types import Message, Part, Role, SendMessageRequest
 
 BASE_URL = "http://localhost:8001"
 
@@ -26,15 +24,16 @@ if not UPLOAD_FILE.exists():
 
 
 def build_uri_message() -> Message:
-    upload = FileWithUri(
-        uri="http://127.0.0.1:3000/upload.txt",
-        name="upload.txt",
-        mime_type="text/plain",
-    )
     return Message(
-        role=Role.user,
+        role=Role.ROLE_USER,
         message_id=str(uuid.uuid4()),
-        parts=[Part(root=FilePart(file=upload))],
+        parts=[
+            Part(
+                url="http://127.0.0.1:3000/upload.txt",
+                filename="upload.txt",
+                media_type="text/plain",
+            )
+        ],
     )
 
 
@@ -53,22 +52,27 @@ async def main() -> None:
         async with httpx.AsyncClient(timeout=30) as http:
             card = await A2ACardResolver(http, BASE_URL).get_agent_card()
 
-            client = await ClientFactory.connect(
+            client = await create_client(
                 card,
                 client_config=ClientConfig(
-                    supported_transports=[card.preferred_transport],
+                    supported_protocol_bindings=[
+                        card.supported_interfaces[0].protocol_binding
+                    ],
                     httpx_client=http,
                 ),
             )
 
-            it = client.send_message(msg)
-            task, _update = await anext(it)
-            await it.aclose()
+            request = SendMessageRequest(message=msg)
+            task = None
+            async for reply in client.send_message(request):
+                if reply.HasField("task"):
+                    task = reply.task
+                    break
 
-            file_out = get_file_parts(task.artifacts[0].parts)[0]
-            file_out = FileWithUri(**file_out.model_dump())
+            file_part = task.artifacts[0].parts[0]
+            download_url = file_part.url
 
-            r = await http.get(file_out.uri)
+            r = await http.get(download_url)
             r.raise_for_status()
             DOWNLOAD_FILE.write_bytes(r.content)
 

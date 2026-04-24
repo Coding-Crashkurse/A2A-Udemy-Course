@@ -4,17 +4,26 @@ from typing import cast
 
 import uvicorn
 from dotenv import load_dotenv
+from fastapi import FastAPI
+from google.protobuf.json_format import MessageToDict
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
+from a2a.helpers import new_task_from_user_message, new_text_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.apps import A2ARESTFastAPIApplication
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.routes import create_agent_card_routes, create_rest_routes
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
-from a2a.types import AgentCapabilities, AgentCard, AgentSkill, Message, TransportProtocol
-from a2a.utils import new_agent_text_message, new_task
+from a2a.types import (
+    AgentCapabilities,
+    AgentCard,
+    AgentInterface,
+    AgentSkill,
+    Message,
+)
+from a2a.utils import TransportProtocol
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
@@ -37,7 +46,8 @@ MODEL = ChatOpenAI(
 
 def _lang_from_message(ctx: RequestContext) -> str:
     msg = cast(Message, ctx.message)
-    lang = msg.metadata[LANG_EXTENSION_URI]["language"]
+    metadata = MessageToDict(msg.metadata) if msg.metadata else {}
+    lang = metadata[LANG_EXTENSION_URI]["language"]
     lang = str(lang).strip().lower()
     return lang.split("-", 1)[0]
 
@@ -54,14 +64,14 @@ class LlmExecutor(AgentExecutor):
 
         user_text = context.get_user_input()
         result = await agent.ainvoke({"messages": [HumanMessage(content=user_text)]})
-        text = result["messages"][-1].content  # one-liner
+        text = result["messages"][-1].content
 
-        task = new_task(cast(Message, context.message))  # immer neuer Task
+        task = new_task_from_user_message(cast(Message, context.message))
         await event_queue.enqueue_event(task)
 
         updater = TaskUpdater(event_queue, task.id, task.context_id)
         await updater.complete(
-            new_agent_text_message(text, context_id=task.context_id, task_id=task.id)
+            new_text_message(text=text, context_id=task.context_id, task_id=task.id)
         )
 
         log.info("completed task_id=%s lang=%s", task.id, lang)
@@ -73,10 +83,13 @@ class LlmExecutor(AgentExecutor):
 agent_card = AgentCard(
     name="Language Extension Demo Agent (REST + LLM)",
     description="LLM-backed demo: language chosen via extension metadata; system prompt is set per request.",
-    url=BASE_URL,
     version="0.1.0-demo",
-    protocol_version="0.3.0",
-    preferred_transport=TransportProtocol.http_json,
+    supported_interfaces=[
+        AgentInterface(
+            url=BASE_URL,
+            protocol_binding=TransportProtocol.HTTP_JSON,
+        ),
+    ],
     capabilities=AgentCapabilities(
         streaming=False,
         push_notifications=False,
@@ -114,9 +127,14 @@ agent_card = AgentCard(
 handler = DefaultRequestHandler(
     agent_executor=LlmExecutor(),
     task_store=InMemoryTaskStore(),
+    agent_card=agent_card,
 )
 
-app = A2ARESTFastAPIApplication(agent_card=agent_card, http_handler=handler).build()
+app = FastAPI()
+for route in create_agent_card_routes(agent_card=agent_card):
+    app.router.routes.append(route)
+for route in create_rest_routes(request_handler=handler):
+    app.router.routes.append(route)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8001)

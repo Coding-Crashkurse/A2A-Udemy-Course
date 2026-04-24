@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 import asyncio
+import json
 import os
 from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
+from google.protobuf.json_format import MessageToDict, ParseDict
 
 from a2a.client.card_resolver import A2ACardResolver
 from a2a.types import AgentCard
@@ -50,32 +50,45 @@ async def fetch_token(http: httpx.AsyncClient) -> str:
 
 async def main() -> None:
     async with httpx.AsyncClient(timeout=15.0) as http:
-        # 1) Public card (SDK resolver)
         print("\n=== 1) PUBLIC AGENT CARD ===")
         public_card = await A2ACardResolver(http, A2A_BASE_URL).get_agent_card()
-        print(public_card.model_dump(mode="json", by_alias=True, exclude_none=True))
+        print(
+            json.dumps(
+                MessageToDict(public_card, preserving_proto_field_name=True),
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
 
-        # 2) Extended without token (should be 401)
         print("\n=== 2) EXTENDED AGENT CARD (WITHOUT TOKEN) ===")
-        r = await http.get(EXTENDED_CARD_URL)
+        r = await http.get(EXTENDED_CARD_URL, headers={"A2A-Version": "1.0"})
         print(f"HTTP {r.status_code}")
         print(r.text)
 
-        # 3) Authenticate
         print("\n=== 3) AUTHENTICATE (CLIENT CREDENTIALS) ===")
         token = await fetch_token(http)
         print("Token received. (not printing token)")
 
-        # 4) Extended with token (should be 200)
         print("\n=== 4) EXTENDED AGENT CARD (WITH TOKEN) ===")
         r = await http.get(
-            EXTENDED_CARD_URL, headers={"Authorization": f"Bearer {token}"}
+            EXTENDED_CARD_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "A2A-Version": "1.0",
+            },
         )
         print(f"HTTP {r.status_code}")
         r.raise_for_status()
 
-        extended_card = AgentCard.model_validate(r.json())
-        print(extended_card.model_dump(mode="json", by_alias=True, exclude_none=True))
+        extended_card = AgentCard()
+        ParseDict(r.json(), extended_card)
+        print(
+            json.dumps(
+                MessageToDict(extended_card, preserving_proto_field_name=True),
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
 
 
 if __name__ == "__main__":

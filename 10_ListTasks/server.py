@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
@@ -5,24 +7,26 @@ from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, Query
+from google.protobuf.json_format import MessageToDict
 
+from a2a.helpers import new_task_from_user_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.apps import A2ARESTFastAPIApplication
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.routes import create_agent_card_routes, create_rest_routes
 from a2a.server.tasks import TaskUpdater
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
+    AgentInterface,
+    ListTasksRequest,
+    ListTasksResponse,
     Part,
     Task,
     TaskState,
-    TextPart,
-    TransportProtocol,
 )
-from a2a.utils import new_task
+from a2a.utils import TransportProtocol
 
-# TaskStore Interface kann je nach SDK-Pfad variieren
 try:
     from a2a.server.tasks import TaskStore
 except Exception:
@@ -47,11 +51,6 @@ log = logging.getLogger("08_ListTasks")
 
 
 class InspectableInMemoryTaskStore(TaskStore):
-    """
-    Minimaler InMemory TaskStore, kompatibel zum DefaultRequestHandler,
-    plus Listing fuer unsere /v1/tasks Endpoint-Implementation.
-    """
-
     def __init__(self) -> None:
         self._tasks: dict[str, Task] = {}
         self._created_order: list[str] = []
@@ -77,7 +76,16 @@ class InspectableInMemoryTaskStore(TaskStore):
     ) -> None:
         async with self._lock:
             self._tasks.pop(task_id, None)
-            # created_order nicht aufwendig bereinigen (Demo)
+
+    async def list(
+        self,
+        params: ListTasksRequest,
+        context: ServerCallContext | None = None,
+    ) -> ListTasksResponse:
+        async with self._lock:
+            return ListTasksResponse(
+                tasks=[self._tasks[tid] for tid in self._created_order if tid in self._tasks]
+            )
 
     async def list_snapshot(
         self,
@@ -88,16 +96,12 @@ class InspectableInMemoryTaskStore(TaskStore):
         page_size: int,
         page_token: str | None,
     ) -> tuple[list[dict[str, Any]], str | None]:
-        """
-        Liefert JSON-serialisierbare Task-Dicts.
-        Pagination: pageToken ist ein Offset-String ("0", "50", ...)
-        """
         try:
             offset = int(page_token) if page_token else 0
         except ValueError:
             offset = 0
 
-        status_norm = status.strip().lower() if status else None
+        status_norm = status.strip().upper() if status else None
 
         async with self._lock:
             ids = list(self._created_order)
@@ -109,13 +113,11 @@ class InspectableInMemoryTaskStore(TaskStore):
                     continue
                 if context_id and t.context_id != context_id:
                     continue
-                if (
-                    status_norm
-                    and t.status
-                    and t.status.state
-                    and t.status.state.value != status_norm
-                ):
-                    continue
+                if status_norm:
+                    state_name = TaskState.Name(t.status.state) if t.status else ""
+                    short = state_name.replace("TASK_STATE_", "")
+                    if short != status_norm:
+                        continue
                 filtered.append(t)
 
             total = len(filtered)
@@ -126,75 +128,60 @@ class InspectableInMemoryTaskStore(TaskStore):
 
             out: list[dict[str, Any]] = []
             for t in page:
-                d = t.model_dump(mode="json", by_alias=True, exclude_none=True)
-
-                # ListTasks soll nicht alles aufblasen
+                d = MessageToDict(t, preserving_proto_field_name=True)
                 d.pop("history", None)
-
                 if not include_artifacts:
                     d.pop("artifacts", None)
-
                 out.append(d)
 
             return out, next_token
 
 
 class FireAndForget30sExecutor(AgentExecutor):
-    """
-    Non-streaming, fire & forget:
-      - Client sendet message:send mit blocking=False
-      - Task laeuft ~30s
-      - working -> completed
-    """
-
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        task = context.current_task or new_task(context.message)
+        task = context.current_task or new_task_from_user_message(context.message)
 
-        # Task initial "anlegen" / sichtbar machen
         await event_queue.enqueue_event(task)
 
         updater = TaskUpdater(event_queue, task.id, task.context_id)
 
         await updater.update_status(
-            TaskState.working,
+            TaskState.TASK_STATE_WORKING,
             updater.new_agent_message(
-                [Part(root=TextPart(text="Accepted. Working... (~30s)"))]
+                [Part(text="Accepted. Working... (~30s)")]
             ),
         )
 
-        # Simulierter Workload mit 3 Progress-Updates
         for i in range(1, 4):
             await asyncio.sleep(DURATION_SECONDS / 3.0)
             await updater.update_status(
-                TaskState.working,
-                updater.new_agent_message(
-                    [Part(root=TextPart(text=f"Progress {i}/3"))]
-                ),
+                TaskState.TASK_STATE_WORKING,
+                updater.new_agent_message([Part(text=f"Progress {i}/3")]),
             )
 
-        # Damit includeArtifacts Sinn macht
         await updater.add_artifact(
-            [Part(root=TextPart(text="Result payload for ListTasks demo"))],
+            [Part(text="Result payload for ListTasks demo")],
             name="result.txt",
         )
 
         await updater.complete(
-            updater.new_agent_message([Part(root=TextPart(text="Done."))])
+            updater.new_agent_message([Part(text="Done.")])
         )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         return
 
 
-# --- A2A App ---
 card = AgentCard(
     name="08 ListTasks Demo Agent (REST)",
     description="Creates long-running tasks and implements GET /v1/tasks for ListTasks.",
-    url=BASE_URL,
     version="0.8.0-demo",
-    protocol_version="0.3.0",
-    preferred_transport=TransportProtocol.http_json,
-    additional_interfaces=[],
+    supported_interfaces=[
+        AgentInterface(
+            url=BASE_URL,
+            protocol_binding=TransportProtocol.HTTP_JSON,
+        ),
+    ],
     capabilities=AgentCapabilities(streaming=False, push_notifications=False),
     default_input_modes=["text/plain"],
     default_output_modes=["text/plain"],
@@ -206,15 +193,16 @@ task_store = InspectableInMemoryTaskStore()
 handler = DefaultRequestHandler(
     agent_executor=FireAndForget30sExecutor(),
     task_store=task_store,
+    agent_card=card,
 )
 
-app: FastAPI = A2ARESTFastAPIApplication(agent_card=card, http_handler=handler).build()
+app: FastAPI = FastAPI()
+for route in create_agent_card_routes(agent_card=card):
+    app.router.routes.append(route)
+for route in create_rest_routes(request_handler=handler):
+    app.router.routes.append(route)
 
 
-# --- OUR ListTasks implementation on the official path: GET /v1/tasks ---
-# In deiner SDK-Version existiert /v1/tasks bereits, aber als Stub -> NotImplemented.
-# Wir registrieren unsere Route UND schieben sie in FastAPI ganz nach vorne,
-# damit sie die SDK-Route überschattet.
 @app.get("/v1/tasks")
 async def list_tasks(
     context_id: str | None = Query(default=None, alias="contextId"),

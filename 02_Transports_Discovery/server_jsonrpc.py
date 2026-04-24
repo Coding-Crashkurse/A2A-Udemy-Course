@@ -1,8 +1,11 @@
 import logging
-import uvicorn
 
-from a2a.server.apps import A2AFastAPIApplication
-from a2a.types import TransportProtocol
+import uvicorn
+from fastapi import FastAPI
+
+from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
+from a2a.types import AgentInterface
+from a2a.utils import TransportProtocol
 
 from shared import build_agent_card, create_request_handler
 
@@ -11,17 +14,21 @@ PORT = 8000
 RPC_URL = "/jsonrpc"
 
 
-def build_app():
+def build_app() -> FastAPI:
     agent_card = build_agent_card(
-        base_url=f"http://localhost:{PORT}{RPC_URL}",
-        preferred_transport=TransportProtocol.jsonrpc,
+        AgentInterface(
+            url=f"http://localhost:{PORT}{RPC_URL}",
+            protocol_binding=TransportProtocol.JSONRPC,
+        ),
     )
-    handler = create_request_handler()
-    app_builder = A2AFastAPIApplication(
-        agent_card=agent_card,
-        http_handler=handler,
-    )
-    return app_builder.build(rpc_url=RPC_URL)
+    handler = create_request_handler(agent_card=agent_card)
+
+    app = FastAPI()
+    for route in create_agent_card_routes(agent_card=agent_card):
+        app.router.routes.append(route)
+    for route in create_jsonrpc_routes(request_handler=handler, rpc_url=RPC_URL):
+        app.router.routes.append(route)
+    return app
 
 
 app = build_app()

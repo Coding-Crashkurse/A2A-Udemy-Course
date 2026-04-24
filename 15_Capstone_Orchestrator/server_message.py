@@ -3,17 +3,19 @@ from pathlib import Path
 
 import uvicorn
 from dotenv import load_dotenv
+from fastapi import FastAPI
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
+from a2a.helpers import new_task_from_user_message, new_text_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.apps import A2ARESTFastAPIApplication
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.routes import create_agent_card_routes, create_rest_routes
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
-from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TransportProtocol
-from a2a.utils import new_agent_text_message, new_task
+from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
+from a2a.utils import TransportProtocol
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
@@ -47,13 +49,13 @@ class GeneralMessageExecutor(AgentExecutor):
         result = await agent.ainvoke({"messages": [HumanMessage(content=user_text)]})
         answer = result["messages"][-1].content
 
-        task = new_task(context.message)
+        task = new_task_from_user_message(context.message)
         await event_queue.enqueue_event(task)
 
         updater = TaskUpdater(event_queue, task.id, task.context_id)
         await updater.complete(
-            new_agent_text_message(
-                answer,
+            new_text_message(
+                text=answer,
                 context_id=task.context_id,
                 task_id=task.id,
             )
@@ -68,10 +70,13 @@ class GeneralMessageExecutor(AgentExecutor):
 agent_card = AgentCard(
     name="General Message Agent (REST + LLM)",
     description="General-purpose agent. Advertises streaming=false in AgentCard.",
-    url=BASE_URL,
     version="0.1.0-demo",
-    protocol_version="0.3.0",
-    preferred_transport=TransportProtocol.http_json,
+    supported_interfaces=[
+        AgentInterface(
+            url=BASE_URL,
+            protocol_binding=TransportProtocol.HTTP_JSON,
+        ),
+    ],
     capabilities=AgentCapabilities(streaming=False, push_notifications=False),
     default_input_modes=["text/plain"],
     default_output_modes=["text/plain"],
@@ -94,9 +99,14 @@ agent_card = AgentCard(
 handler = DefaultRequestHandler(
     agent_executor=GeneralMessageExecutor(),
     task_store=InMemoryTaskStore(),
+    agent_card=agent_card,
 )
 
-app = A2ARESTFastAPIApplication(agent_card=agent_card, http_handler=handler).build()
+app = FastAPI()
+for route in create_agent_card_routes(agent_card=agent_card):
+    app.router.routes.append(route)
+for route in create_rest_routes(request_handler=handler):
+    app.router.routes.append(route)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8003)

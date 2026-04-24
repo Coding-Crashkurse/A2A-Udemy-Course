@@ -1,8 +1,11 @@
 import logging
-import uvicorn
 
-from a2a.server.apps import A2ARESTFastAPIApplication
-from a2a.types import TransportProtocol
+import uvicorn
+from fastapi import FastAPI
+
+from a2a.server.routes import create_agent_card_routes, create_rest_routes
+from a2a.types import AgentInterface
+from a2a.utils import TransportProtocol
 
 from shared import build_agent_card, create_request_handler
 
@@ -10,17 +13,21 @@ HOST = "0.0.0.0"
 PORT = 8001
 
 
-def build_app():
+def build_app() -> FastAPI:
     agent_card = build_agent_card(
-        base_url=f"http://localhost:{PORT}",
-        preferred_transport=TransportProtocol.http_json,
+        AgentInterface(
+            url=f"http://localhost:{PORT}",
+            protocol_binding=TransportProtocol.HTTP_JSON,
+        ),
     )
-    handler = create_request_handler()
-    app_builder = A2ARESTFastAPIApplication(
-        agent_card=agent_card,
-        http_handler=handler,
-    )
-    return app_builder.build()
+    handler = create_request_handler(agent_card=agent_card)
+
+    app = FastAPI()
+    for route in create_agent_card_routes(agent_card=agent_card):
+        app.router.routes.append(route)
+    for route in create_rest_routes(request_handler=handler):
+        app.router.routes.append(route)
+    return app
 
 
 app = build_app()

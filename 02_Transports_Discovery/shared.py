@@ -1,20 +1,11 @@
 import logging
-import uuid
 
+from a2a.helpers import new_text_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
-from a2a.types import (
-    AgentCapabilities,
-    AgentCard,
-    AgentInterface,
-    Message,
-    Part,
-    Role,
-    TextPart,
-    TransportProtocol,
-)
+from a2a.types import AgentCapabilities, AgentCard, AgentInterface
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +15,10 @@ class EchoExecutor(AgentExecutor):
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         user_text = context.get_user_input()
-        response = Message(
-            role=Role.agent,
-            message_id=str(uuid.uuid4()),
+        response = new_text_message(
+            text=f"Echo: {user_text}",
             context_id=context.context_id,
             task_id=context.task_id,
-            parts=[Part(root=TextPart(text=f"Echo: {user_text}"))],
         )
         await event_queue.enqueue_event(response)
 
@@ -41,19 +30,14 @@ class EchoExecutor(AgentExecutor):
 
 
 def build_agent_card(
-    base_url: str,
-    preferred_transport: TransportProtocol | str,
-    *,
-    additional_interfaces: list[AgentInterface] | None = None,
+    *interfaces: AgentInterface,
 ) -> AgentCard:
-    """Create a compact AgentCard tailored to a single transport."""
+    """Create a compact AgentCard with one or more transport interfaces."""
     return AgentCard(
         name="Echo Agent",
         description="A simple echo service used in transport examples.",
         version="0.2.0",
-        url=base_url,
-        preferred_transport=preferred_transport,
-        additional_interfaces=additional_interfaces or [],
+        supported_interfaces=list(interfaces),
         capabilities=AgentCapabilities(streaming=False, push_notifications=False),
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
@@ -62,10 +46,12 @@ def build_agent_card(
 
 
 def create_request_handler(
+    agent_card: AgentCard,
     executor: AgentExecutor | None = None,
 ) -> DefaultRequestHandler:
     """Instantiate the default handler with an in-memory task store."""
     return DefaultRequestHandler(
         agent_executor=executor or EchoExecutor(),
         task_store=InMemoryTaskStore(),
+        agent_card=agent_card,
     )
