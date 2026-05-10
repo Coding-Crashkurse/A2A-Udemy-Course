@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import httpx
 import typer
@@ -23,7 +23,9 @@ from a2a.types import (
     AgentInterface,
     AgentSkill,
     HTTPAuthSecurityScheme,
+    SecurityRequirement,
     SecurityScheme,
+    StringList,
     UnsupportedOperationError,
 )
 from a2a.utils import TransportProtocol
@@ -38,10 +40,8 @@ ISSUER = f"https://{AUTH0_DOMAIN}/"
 JWKS_URL = f"{ISSUER}.well-known/jwks.json"
 JWT_ALGORITHMS = ["RS256"]
 
-EXTENDED_CARD_PATH_V03 = "/v1/card"
-EXTENDED_CARD_PATH_V10 = "/v1/extendedAgentCard"
-
-Mode = Literal["legacy", "v1"]
+EXTENDED_CARD_PATH = "/v1/extendedAgentCard"
+SUPPORTED_PROTOCOL_VERSION = "1.0"
 
 
 def problem(
@@ -69,25 +69,14 @@ def missing_a2a_version() -> JSONResponse:
     )
 
 
-def version_not_supported(requested: str, *, supported: list[str]) -> JSONResponse:
+def version_not_supported(requested: str) -> JSONResponse:
     return problem(
         400,
         "https://a2a-protocol.org/errors/version-not-supported",
         "Protocol Version Not Supported",
         f"The requested A2A protocol version {requested} is not supported by this agent",
-        supportedVersions=supported,
+        supportedVersions=[SUPPORTED_PROTOCOL_VERSION],
         requestedVersion=requested,
-    )
-
-
-def wrong_endpoint_for_version(requested: str, expected_path: str) -> JSONResponse:
-    return problem(
-        400,
-        "https://a2a-protocol.org/errors/version-not-supported",
-        "Protocol Version Not Supported",
-        f"For A2A-Version {requested}, use {expected_path}",
-        requestedVersion=requested,
-        expectedPath=expected_path,
     )
 
 
@@ -120,19 +109,16 @@ async def verify_bearer_or_raise(authorization: str | None) -> dict[str, Any]:
         raise PermissionError("Invalid token") from e
 
 
-def _security_schemes() -> tuple[dict[str, SecurityScheme], list[dict[str, list[str]]]]:
+def _security_schemes() -> tuple[dict[str, SecurityScheme], list[SecurityRequirement]]:
     bearer = HTTPAuthSecurityScheme(scheme="Bearer", bearer_format="JWT")
-    schemes: dict[str, SecurityScheme] = {"bearer": SecurityScheme(root=bearer)}
-    security: list[dict[str, list[str]]] = [{"bearer": []}]
+    schemes: dict[str, SecurityScheme] = {
+        "bearer": SecurityScheme(http_auth_security_scheme=bearer)
+    }
+    security = [SecurityRequirement(schemes={"bearer": StringList(list=[])})]
     return schemes, security
 
 
-def build_public_agent_card(
-    *,
-    base_url: str,
-    agent_version: str,
-    label: str,
-) -> AgentCard:
+def build_public_agent_card(*, base_url: str, agent_version: str, label: str) -> AgentCard:
     schemes, security = _security_schemes()
     return AgentCard(
         name=f"AgentCard Versioning Demo ({label})",
@@ -144,7 +130,9 @@ def build_public_agent_card(
                 protocol_binding=TransportProtocol.HTTP_JSON,
             ),
         ],
-        capabilities=AgentCapabilities(streaming=False, push_notifications=False),
+        capabilities=AgentCapabilities(
+            streaming=False, push_notifications=False, extended_agent_card=True
+        ),
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
         skills=[
@@ -156,17 +144,11 @@ def build_public_agent_card(
             )
         ],
         security_schemes=schemes,
-        security=security,
-        supports_authenticated_extended_card=True,
+        security_requirements=security,
     )
 
 
-def build_private_agent_card(
-    *,
-    base_url: str,
-    agent_version: str,
-    label: str,
-) -> AgentCard:
+def build_private_agent_card(*, base_url: str, agent_version: str, label: str) -> AgentCard:
     schemes, security = _security_schemes()
     return AgentCard(
         name=f"AgentCard Versioning Demo (Extended, {label})",
@@ -178,7 +160,9 @@ def build_private_agent_card(
                 protocol_binding=TransportProtocol.HTTP_JSON,
             ),
         ],
-        capabilities=AgentCapabilities(streaming=False, push_notifications=False),
+        capabilities=AgentCapabilities(
+            streaming=False, push_notifications=False, extended_agent_card=True
+        ),
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
         skills=[
@@ -196,8 +180,7 @@ def build_private_agent_card(
             ),
         ],
         security_schemes=schemes,
-        security=security,
-        supports_authenticated_extended_card=True,
+        security_requirements=security,
     )
 
 
@@ -209,23 +192,14 @@ class CardOnlyExecutor(AgentExecutor):
         return
 
 
-def build_app(*, mode: Mode, port: int, agent_version: str, label: str) -> FastAPI:
+def build_app(*, port: int, agent_version: str, label: str) -> FastAPI:
     base_url = f"http://localhost:{port}"
 
-    if mode == "legacy":
-        supported_versions = ["0.3"]
-    else:
-        supported_versions = ["1.0"]
-
     public_card = build_public_agent_card(
-        base_url=base_url,
-        agent_version=agent_version,
-        label=label,
+        base_url=base_url, agent_version=agent_version, label=label
     )
     private_card = build_private_agent_card(
-        base_url=base_url,
-        agent_version=agent_version,
-        label=label,
+        base_url=base_url, agent_version=agent_version, label=label
     )
 
     handler = DefaultRequestHandler(
@@ -235,20 +209,20 @@ def build_app(*, mode: Mode, port: int, agent_version: str, label: str) -> FastA
     )
 
     app = FastAPI()
-    for route in create_agent_card_routes(agent_card=public_card):
-        app.router.routes.append(route)
-    for route in create_rest_routes(request_handler=handler):
-        app.router.routes.append(route)
 
-    extended_card_path = (
-        EXTENDED_CARD_PATH_V03 if mode == "legacy" else EXTENDED_CARD_PATH_V10
-    )
-
-    @app.get(extended_card_path)
+    # Custom extended-card route MUST be registered before the SDK rest routes,
+    # since create_rest_routes adds a catch-all Mount(path="/{tenant}") that
+    # would otherwise intercept /v1/extendedAgentCard.
+    @app.get(EXTENDED_CARD_PATH)
     async def get_extended_agent_card() -> JSONResponse:
         return JSONResponse(
             MessageToDict(private_card, preserving_proto_field_name=True)
         )
+
+    for route in create_agent_card_routes(agent_card=public_card):
+        app.router.routes.append(route)
+    for route in create_rest_routes(request_handler=handler):
+        app.router.routes.append(route)
 
     @app.middleware("http")
     async def gate(request: Request, call_next):
@@ -261,16 +235,10 @@ def build_app(*, mode: Mode, port: int, agent_version: str, label: str) -> FastA
         if requested is None:
             return missing_a2a_version()
 
-        if requested not in supported_versions:
-            return version_not_supported(requested, supported=supported_versions)
+        if requested != SUPPORTED_PROTOCOL_VERSION:
+            return version_not_supported(requested)
 
-        if path == EXTENDED_CARD_PATH_V03 and requested != "0.3":
-            return wrong_endpoint_for_version(requested, EXTENDED_CARD_PATH_V10)
-
-        if path == EXTENDED_CARD_PATH_V10 and requested != "1.0":
-            return wrong_endpoint_for_version(requested, EXTENDED_CARD_PATH_V03)
-
-        if path == EXTENDED_CARD_PATH_V03 or path == EXTENDED_CARD_PATH_V10:
+        if path == EXTENDED_CARD_PATH:
             try:
                 await verify_bearer_or_raise(request.headers.get("authorization"))
             except PermissionError as e:
@@ -283,10 +251,6 @@ def build_app(*, mode: Mode, port: int, agent_version: str, label: str) -> FastA
 
 @cli.callback(invoke_without_command=True)
 def main(
-    mode: Mode = typer.Option(
-        "legacy",
-        help="legacy (0.3 + /v1/card) | v1 (1.0 + /v1/extendedAgentCard)",
-    ),
     host: str = typer.Option("127.0.0.1"),
     port: int = typer.Option(8001),
     agent_version: str = typer.Option(
@@ -298,7 +262,7 @@ def main(
         help="Free label shown in name/description (not used for version checks).",
     ),
 ) -> None:
-    app = build_app(mode=mode, port=port, agent_version=agent_version, label=label)
+    app = build_app(port=port, agent_version=agent_version, label=label)
     uvicorn.run(app, host=host, port=port)
 
 

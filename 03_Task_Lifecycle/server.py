@@ -96,7 +96,7 @@ def main(
     agent_card = AgentCard(
         name="03_Tasks - Fixed Lifecycle Demo Agent (REST)",
         description="REST-only demo: always returns a Task in a fixed terminal state.",
-        version="0.3.0-demo",
+        version="1.0.x-demo",
         supported_interfaces=[
             AgentInterface(
                 url=BASE_URL,

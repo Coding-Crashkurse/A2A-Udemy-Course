@@ -1,9 +1,7 @@
-from __future__ import annotations
-
 import asyncio
 import os
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import httpx
 import typer
@@ -20,25 +18,13 @@ AUTH0_AUDIENCE: str = os.environ["AUTH0_AUDIENCE"]
 TOKEN_URL: str = f"https://{AUTH0_DOMAIN}/oauth/token"
 
 A2A_BASE_URL: str = os.environ.get("A2A_BASE_URL", "http://localhost:8001")
-A2A_BASE_URL_V1: str = os.environ.get("A2A_BASE_URL_V1", "http://localhost:8002")
-
-Target = Literal["legacy", "v1"]
-
-
-def base_url_for(target: Target) -> str:
-    return A2A_BASE_URL if target == "legacy" else A2A_BASE_URL_V1
-
-
-def extended_card_path_for(protocol_version: str) -> str:
-    if protocol_version == "0.3":
-        return "/v1/card"
-    if protocol_version == "1.0":
-        return "/v1/extendedAgentCard"
-    raise ValueError(f"unsupported protocol_version: {protocol_version}")
+EXTENDED_CARD_PATH = "/v1/extendedAgentCard"
+PROTOCOL_VERSION = "1.0"
 
 
 def parse_semver_3(v: str) -> tuple[int, int, int]:
-    major_s, minor_s, patch_s = v.split(".")
+    core = v.split("-", 1)[0].split("+", 1)[0]
+    major_s, minor_s, patch_s = core.split(".")
     return int(major_s), int(minor_s), int(patch_s)
 
 
@@ -72,37 +58,37 @@ async def fetch_token(http: httpx.AsyncClient) -> str:
 
 @app.callback(invoke_without_command=True)
 def main(
-    target: Target = typer.Option("legacy", help="legacy(8001) or v1(8002)"),
-    protocol_version: str = typer.Option("0.3", help="A2A-Version header: 0.3 or 1.0"),
+    base_url: str = typer.Option(
+        A2A_BASE_URL, help="Server base URL (default reads $A2A_BASE_URL)."
+    ),
     min_agent_version: str = typer.Option(
         "0.2.0",
         help="Client policy: do not talk to agents with AgentCard.version below this (x.y.z).",
     ),
 ) -> None:
     async def _run() -> None:
-        base_url = base_url_for(target).rstrip("/")
-        path = extended_card_path_for(protocol_version)
-        url = f"{base_url}{path}"
+        target = base_url.rstrip("/")
+        url = f"{target}{EXTENDED_CARD_PATH}"
 
         async with httpx.AsyncClient(timeout=15.0) as http:
-            agent_version = await fetch_public_agent_version(http, base_url)
+            agent_version = await fetch_public_agent_version(http, target)
             if parse_semver_3(agent_version) < parse_semver_3(min_agent_version):
                 print(
                     f"BLOCKED: agent_version={agent_version} < min_agent_version={min_agent_version} "
-                    f"(target={target}, base_url={base_url})"
+                    f"(base_url={target})"
                 )
                 return
 
             token = await fetch_token(http)
 
             headers = {
-                "A2A-Version": protocol_version,
+                "A2A-Version": PROTOCOL_VERSION,
                 "Authorization": f"Bearer {token}",
             }
             r = await http.get(url, headers=headers)
 
             print(
-                f"{target=} agent_version={agent_version} {protocol_version=} GET {path} -> HTTP {r.status_code}"
+                f"agent_version={agent_version} GET {EXTENDED_CARD_PATH} -> HTTP {r.status_code}"
             )
             if r.status_code != 200:
                 print(r.text[:800])

@@ -31,7 +31,7 @@ A2A_BASE_URL: str = os.environ.get("A2A_BASE_URL", "http://localhost:8001")
 
 TOKEN_URL: str = f"https://{AUTH0_DOMAIN}/oauth/token"
 AGENT_CARD_URL: str = f"{A2A_BASE_URL}/.well-known/agent-card.json"
-STREAM_URL: str = f"{A2A_BASE_URL}/v1/message:stream"
+STREAM_URL: str = f"{A2A_BASE_URL}/message:stream"
 
 
 async def fetch_token(http: httpx.AsyncClient) -> str:

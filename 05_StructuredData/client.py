@@ -6,7 +6,7 @@ from typing import Literal
 import httpx
 import typer
 from google.protobuf.json_format import MessageToDict
-from google.protobuf.struct_pb2 import Struct
+from google.protobuf.struct_pb2 import Value
 
 from a2a.client import ClientConfig, create_client
 from a2a.client.card_resolver import A2ACardResolver
@@ -70,8 +70,8 @@ def main(
             )
 
             try:
-                data = Struct()
-                data.update({"action": "list_tickets", "status": status})
+                data = Value()
+                data.struct_value.update({"action": "list_tickets", "status": status})
 
                 msg = Message(
                     role=Role.ROLE_USER,

@@ -20,7 +20,7 @@ AUTH0_AUDIENCE = os.environ["AUTH0_AUDIENCE"]
 A2A_BASE_URL = os.environ.get("A2A_BASE_URL", "http://localhost:8001")
 
 TOKEN_URL = f"https://{AUTH0_DOMAIN}/oauth/token"
-EXTENDED_CARD_URL = f"{A2A_BASE_URL}/v1/card"
+EXTENDED_CARD_URL = f"{A2A_BASE_URL}/v1/extendedAgentCard"
 
 
 async def fetch_token(http: httpx.AsyncClient) -> str:

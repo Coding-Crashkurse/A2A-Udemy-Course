@@ -38,7 +38,7 @@ ISSUER = f"https://{AUTH0_DOMAIN}/"
 JWKS_URL = f"{ISSUER}.well-known/jwks.json"
 JWT_ALGORITHMS = ["RS256"]
 
-EXTENDED_CARD_PATH = "/v1/card"
+EXTENDED_CARD_PATH = "/v1/extendedAgentCard"
 
 
 async def fetch_jwks() -> dict:
@@ -166,17 +166,22 @@ handler = DefaultRequestHandler(
 )
 
 app = FastAPI()
-for route in create_agent_card_routes(agent_card=public_card):
-    app.router.routes.append(route)
-for route in create_rest_routes(request_handler=handler):
-    app.router.routes.append(route)
 
 
+# Custom routes must be registered BEFORE create_rest_routes, since the SDK
+# adds a catch-all Mount(path="/{tenant}") that would otherwise intercept any
+# unmatched /v1/... path and return 400 / 404.
 @app.get(EXTENDED_CARD_PATH)
 async def get_extended_agent_card() -> JSONResponse:
     return JSONResponse(
         MessageToDict(private_card, preserving_proto_field_name=True)
     )
+
+
+for route in create_agent_card_routes(agent_card=public_card):
+    app.router.routes.append(route)
+for route in create_rest_routes(request_handler=handler):
+    app.router.routes.append(route)
 
 
 @app.middleware("http")

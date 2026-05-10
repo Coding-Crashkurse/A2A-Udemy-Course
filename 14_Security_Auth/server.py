@@ -7,7 +7,8 @@ from typing import Any, cast
 import httpx
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from jose import jwt
 from jose.exceptions import JWTError
 
@@ -184,6 +185,9 @@ def build_agent_card() -> AgentCard:
     )
 
 
+PUBLIC_PATHS = {"/.well-known/agent-card.json"}
+
+
 def build_app() -> FastAPI:
     card = build_agent_card()
     handler = DefaultRequestHandler(
@@ -194,15 +198,25 @@ def build_app() -> FastAPI:
 
     app = FastAPI()
 
-    # Public AgentCard routes
+    # AgentCard route (public, no auth)
     for route in create_agent_card_routes(agent_card=card):
         app.router.routes.append(route)
 
-    # Protected A2A routes
-    protected = APIRouter(dependencies=[Depends(require_auth)])
+    # A2A REST routes — auth is enforced by the middleware below, since
+    # FastAPI's Depends() does NOT wrap manually-appended Starlette
+    # Route/Mount objects (those are what create_rest_routes returns).
     for route in create_rest_routes(request_handler=handler):
-        protected.routes.append(route)
-    app.include_router(protected)
+        app.router.routes.append(route)
+
+    @app.middleware("http")
+    async def gate_auth(request: Request, call_next):
+        if request.url.path in PUBLIC_PATHS:
+            return await call_next(request)
+        try:
+            await require_auth(request.headers.get("authorization"))
+        except HTTPException as e:
+            return JSONResponse({"detail": e.detail}, status_code=e.status_code)
+        return await call_next(request)
 
     return app
 

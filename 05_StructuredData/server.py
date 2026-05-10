@@ -5,7 +5,7 @@ from typing import Literal, TypedDict, cast
 import uvicorn
 from fastapi import FastAPI
 from google.protobuf.json_format import MessageToDict
-from google.protobuf.struct_pb2 import Struct
+from google.protobuf.struct_pb2 import Value
 
 from a2a.helpers import new_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
@@ -92,10 +92,10 @@ def get_data_parts(parts):
     return out
 
 
-def _struct_from_dict(d: dict) -> Struct:
-    s = Struct()
-    s.update(d)
-    return s
+def _value_from_dict(d: dict) -> Value:
+    v = Value()
+    v.struct_value.update(d)
+    return v
 
 
 class StructuredDataExecutor(AgentExecutor):
@@ -125,7 +125,7 @@ class StructuredDataExecutor(AgentExecutor):
         agent_msg = new_message(
             parts=[
                 Part(text=f"Found {len(tickets)} tickets (status={status})."),
-                Part(data=_struct_from_dict(cast(dict, payload))),
+                Part(data=_value_from_dict(cast(dict, payload))),
             ],
             context_id=context.context_id,
             task_id=context.task_id,
@@ -135,7 +135,7 @@ class StructuredDataExecutor(AgentExecutor):
             artifact_id=str(uuid.uuid4()),
             name="tickets.json",
             description="Ticket list as JSON (DataPart).",
-            parts=[Part(data=_struct_from_dict(cast(dict, payload)))],
+            parts=[Part(data=_value_from_dict(cast(dict, payload)))],
             metadata={"media_type": "application/json"},
         )
 
