@@ -1,5 +1,17 @@
+# Python / tooling
 .venv
 .ruff_cache
-.env
 __pycache__/
 *.pyc
+
+# Secrets
+.env
+
+# Working artifacts (not part of the course)
+helper/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -5,6 +5,9 @@ A2A Protocol (GitHub): https://github.com/a2a-protocol
 
 ## Directories
 
+Folder numbers follow the course teaching order. Modules 07–10 together cover
+"task updates" (the four ways to follow a long-running task).
+
 ### 01_Message
 Basic message structure, roles, and content parts.
 
@@ -29,32 +32,36 @@ Polling flow for task updates.
 ### 08_Streaming
 Streaming updates and incremental responses.
 
-### 09_MultiTurn_Context
-Multi-turn context handling.
+### 09_Resubscribe
+Resubscribe to a running task after a dropped connection.
 
-### 10_ListTasks
+### 10_PushNotifications
+Push notifications (webhooks) for task updates.
+
+### 11_MultiTurn_Context
+Multi-turn conversations and context handling.
+
+### 12_ListTasks
 Listing and filtering tasks.
 
-### 11_PushNotifications
-Push notifications for task updates.
-
-### 12_CancelTasks
+### 13_CancelTasks
 Task cancellation and cleanup.
 
-### 13_Resubscribe
-Resubscribe to running tasks.
+### 14_ErrorHandling
+The A2A error catalog and how each error maps onto every transport
+(HTTP / JSON-RPC / gRPC). Minimal server + client that provoke and inspect errors.
 
-### 14_Security_Auth
+### 15_Security_Auth
 Authentication and authorization flows (Auth0).
 
-### 15_Capstone_Orchestrator
+### 16_Capstone_Orchestrator
 Capstone orchestrator that routes to sub-agents.
 
-### 16_Advanced_Versioning
+### 17_Advanced_Versioning
 Protocol versioning and compatibility.
 
-### 17_Advanced_ExtendedCard
+### 18_Advanced_ExtendedCard
 Extended AgentCard endpoints and auth.
 
-### 18_Advanced_Extensions
+### 19_Advanced_Extensions
 Protocol extensions and custom metadata.
