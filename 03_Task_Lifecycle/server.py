@@ -42,7 +42,7 @@ class TaskLifecycleExecutor(AgentExecutor):
             artifacts = [
                 Artifact(
                     artifact_id="result",
-                    name="result.txt",
+                    name="result",
                     description="The task's actual output.",
                     parts=[Part(text=f"Echo: {user_text}")],
                     metadata={"media_type": "text/plain"},
