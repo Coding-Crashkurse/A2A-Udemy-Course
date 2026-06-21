@@ -7,7 +7,7 @@ import typer
 from a2a.client import ClientConfig, create_client, minimal_agent_card
 from a2a.client.card_resolver import A2ACardResolver
 from a2a.helpers import get_stream_response_text, new_text_message
-from a2a.types import AgentCard, Role, SendMessageRequest, StreamResponse
+from a2a.types import AgentCard, Role, SendMessageRequest
 from a2a.utils import TransportProtocol
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -26,8 +26,12 @@ async def load_card(port: int) -> AgentCard:
         )
 
 
-def build_config() -> ClientConfig:
-    return ClientConfig(
+async def _run(port: int, text: str) -> None:
+    card = await load_card(port)
+    iface = card.supported_interfaces[0]
+    logger.info("AgentCard: binding=%s url=%s", iface.protocol_binding, iface.url)
+
+    config = ClientConfig(
         supported_protocol_bindings=[
             TransportProtocol.JSONRPC,
             TransportProtocol.HTTP_JSON,
@@ -36,29 +40,13 @@ def build_config() -> ClientConfig:
         grpc_channel_factory=lambda url: grpc.aio.insecure_channel(url),
         httpx_client=httpx.AsyncClient(),
     )
-
-
-def describe_card(card: AgentCard) -> str:
-    if not card.supported_interfaces:
-        return "<no interfaces>"
-    iface = card.supported_interfaces[0]
-    return f"binding={iface.protocol_binding} url={iface.url}"
-
-
-async def _run(port: int, text: str) -> None:
-    card = await load_card(port)
-    logger.info("AgentCard: %s", describe_card(card))
-
-    client = await create_client(card, client_config=build_config())
+    client = await create_client(card, client_config=config)
     try:
         request = SendMessageRequest(
             message=new_text_message(text=text, role=Role.ROLE_USER)
         )
         async for reply in client.send_message(request):
-            if isinstance(reply, StreamResponse) and reply.HasField("message"):
-                logger.info("Reply: %s", get_stream_response_text(reply))
-            else:
-                logger.info("Reply: %r", reply)
+            logger.info("Reply: %s", get_stream_response_text(reply))
     finally:
         await client.close()
 
