@@ -81,9 +81,7 @@ class MultiTurnStreamingExecutor(AgentExecutor):
             name="greeting.txt",
         )
 
-        await updater.complete(
-            updater.new_agent_message([Part(text="Fertig ✅")])
-        )
+        await updater.complete(updater.new_agent_message([Part(text="Fertig ✅")]))
 
         PHASE_BY_TASK_ID.pop(task.id, None)
 

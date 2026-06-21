@@ -85,7 +85,9 @@ card = AgentCard(
 
 push_config_store = InMemoryPushNotificationConfigStore()
 push_http = httpx.AsyncClient(timeout=10.0)
-push_sender = BasePushNotificationSender(push_http, push_config_store, ServerCallContext())
+push_sender = BasePushNotificationSender(
+    push_http, push_config_store, ServerCallContext()
+)
 
 handler = DefaultRequestHandler(
     agent_executor=PushOnlyDemoExecutor(),

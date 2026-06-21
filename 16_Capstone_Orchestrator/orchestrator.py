@@ -95,8 +95,12 @@ class OrchestratorExecutor(AgentExecutor):
         timeout = httpx.Timeout(60.0, connect=10.0)
 
         async with httpx.AsyncClient(timeout=timeout) as http:
-            football_card = await A2ACardResolver(http, FOOTBALL_AGENT_URL).get_agent_card()
-            general_card = await A2ACardResolver(http, GENERAL_AGENT_URL).get_agent_card()
+            football_card = await A2ACardResolver(
+                http, FOOTBALL_AGENT_URL
+            ).get_agent_card()
+            general_card = await A2ACardResolver(
+                http, GENERAL_AGENT_URL
+            ).get_agent_card()
 
             football_card_json = _card_to_json(football_card)
             general_card_json = _card_to_json(general_card)
@@ -143,11 +147,17 @@ class OrchestratorExecutor(AgentExecutor):
                 )
 
                 user_text = context.get_user_input()
-                router_result = await router.ainvoke({"messages": [HumanMessage(content=user_text)]})
+                router_result = await router.ainvoke(
+                    {"messages": [HumanMessage(content=user_text)]}
+                )
                 decision: RouteDecision = router_result["structured_response"]
 
-                used_card = football_card if decision.target == "football" else general_card
-                used_client = football_client if decision.target == "football" else general_client
+                used_card = (
+                    football_card if decision.target == "football" else general_card
+                )
+                used_client = (
+                    football_client if decision.target == "football" else general_client
+                )
 
                 outbound = new_text_message(text=decision.query, role=Role.ROLE_USER)
 
@@ -176,7 +186,7 @@ class OrchestratorExecutor(AgentExecutor):
                         "2) Use ONLY the provided REMOTE_AGENT_ANSWER.\n"
                         "3) The output MUST clearly state which agent was consulted.\n\n"
                         "Required format:\n"
-                        "Start with: I consulted agent \"<NAME>\" (<URL>) and received the following information:\n"
+                        'Start with: I consulted agent "<NAME>" (<URL>) and received the following information:\n'
                         "Then include the remote agent answer.\n"
                         "Do not add any new facts.\n"
                     ),

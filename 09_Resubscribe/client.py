@@ -35,8 +35,7 @@ def fmt_stream_response(reply) -> str:
     if reply.HasField("artifact_update"):
         au = reply.artifact_update
         return (
-            f"artifact={au.artifact.name}"
-            f" artifactText={get_artifact_text(au.artifact)}"
+            f"artifact={au.artifact.name} artifactText={get_artifact_text(au.artifact)}"
         )
     return "<unknown>"
 
@@ -46,9 +45,7 @@ async def connect_streaming_client(card):
     client = await create_client(
         card,
         client_config=ClientConfig(
-            supported_protocol_bindings=[
-                card.supported_interfaces[0].protocol_binding
-            ],
+            supported_protocol_bindings=[card.supported_interfaces[0].protocol_binding],
             httpx_client=http,
             streaming=True,
             polling=False,

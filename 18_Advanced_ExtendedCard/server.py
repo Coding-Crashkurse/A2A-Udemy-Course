@@ -173,9 +173,7 @@ app = FastAPI()
 # unmatched /v1/... path and return 400 / 404.
 @app.get(EXTENDED_CARD_PATH)
 async def get_extended_agent_card() -> JSONResponse:
-    return JSONResponse(
-        MessageToDict(private_card, preserving_proto_field_name=True)
-    )
+    return JSONResponse(MessageToDict(private_card, preserving_proto_field_name=True))
 
 
 for route in create_agent_card_routes(agent_card=public_card):

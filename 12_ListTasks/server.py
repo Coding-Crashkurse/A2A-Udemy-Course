@@ -84,7 +84,11 @@ class InspectableInMemoryTaskStore(TaskStore):
     ) -> ListTasksResponse:
         async with self._lock:
             return ListTasksResponse(
-                tasks=[self._tasks[tid] for tid in self._created_order if tid in self._tasks]
+                tasks=[
+                    self._tasks[tid]
+                    for tid in self._created_order
+                    if tid in self._tasks
+                ]
             )
 
     async def list_snapshot(
@@ -147,9 +151,7 @@ class FireAndForget30sExecutor(AgentExecutor):
 
         await updater.update_status(
             TaskState.TASK_STATE_WORKING,
-            updater.new_agent_message(
-                [Part(text="Accepted. Working... (~30s)")]
-            ),
+            updater.new_agent_message([Part(text="Accepted. Working... (~30s)")]),
         )
 
         for i in range(1, 4):
@@ -164,9 +166,7 @@ class FireAndForget30sExecutor(AgentExecutor):
             name="result.txt",
         )
 
-        await updater.complete(
-            updater.new_agent_message([Part(text="Done.")])
-        )
+        await updater.complete(updater.new_agent_message([Part(text="Done.")]))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         return

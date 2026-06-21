@@ -34,8 +34,20 @@ class TaskLifecycleExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         user_text = context.get_user_input()
 
+        artifacts: list[Artifact] = []
         if self.terminal_state == TaskState.TASK_STATE_COMPLETED:
-            text = f"Completed Task: Echo: {user_text}"
+            # The deliverable lives in an ARTIFACT. The status message below only
+            # talks *about* the outcome — it is not the result itself.
+            text = "Task completed. The result is attached as an artifact."
+            artifacts = [
+                Artifact(
+                    artifact_id="result",
+                    name="result.txt",
+                    description="The task's actual output.",
+                    parts=[Part(text=f"Echo: {user_text}")],
+                    metadata={"media_type": "text/plain"},
+                )
+            ]
         elif self.terminal_state == TaskState.TASK_STATE_REJECTED:
             text = f"Rejected Task: Validation failed (demo). Input was: {user_text}"
         else:
@@ -46,20 +58,6 @@ class TaskLifecycleExecutor(AgentExecutor):
             context_id=context.context_id,
             task_id=context.task_id,
         )
-
-        artifacts: list[Artifact] = []
-        if self.terminal_state == TaskState.TASK_STATE_COMPLETED:
-            artifacts = [
-                Artifact(
-                    artifact_id="fake-pdf",
-                    name="fake.pdf",
-                    description="Fake PDF artifact (placeholder).",
-                    parts=[
-                        Part(text="PDF placeholder content (not a real PDF).")
-                    ],
-                    metadata={"media_type": "application/pdf"},
-                )
-            ]
 
         task = Task(
             id=context.task_id,

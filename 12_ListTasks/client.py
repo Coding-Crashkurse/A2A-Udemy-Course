@@ -23,7 +23,11 @@ BASE_URL = "http://localhost:8001"
 
 def fmt_task_line(t: Task) -> str:
     state = TaskState.Name(t.status.state) if t.status else "<?>"
-    msg = get_message_text(t.status.message) if t.status and t.status.HasField("message") else ""
+    msg = (
+        get_message_text(t.status.message)
+        if t.status and t.status.HasField("message")
+        else ""
+    )
     return f"taskId={t.id} contextId={t.context_id} state={state} statusText={msg!r}"
 
 

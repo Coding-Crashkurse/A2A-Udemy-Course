@@ -1,7 +1,7 @@
 [project]
 name = "a2a-udemy-course"
 version = "0.1.0"
-description = "Add your description here"
+description = "Repo A2A Udemy Course"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

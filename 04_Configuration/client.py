@@ -7,7 +7,13 @@ import typer
 from a2a.client import ClientConfig, create_client
 from a2a.client.card_resolver import A2ACardResolver
 from a2a.helpers import get_artifact_text, get_message_text, new_text_message
-from a2a.types import Role, SendMessageConfiguration, SendMessageRequest, Task, TaskState
+from a2a.types import (
+    Role,
+    SendMessageConfiguration,
+    SendMessageRequest,
+    Task,
+    TaskState,
+)
 
 BASE_URL = "http://localhost:8001"
 
@@ -34,7 +40,9 @@ def print_task(task: Task) -> None:
     else:
         print(f"artifactsCount={len(task.artifacts)}")
         for i, a in enumerate(task.artifacts):
-            print(f"  [{i}] name={a.name} meta={dict(a.metadata) if a.metadata else {}}")
+            print(
+                f"  [{i}] name={a.name} meta={dict(a.metadata) if a.metadata else {}}"
+            )
             print(f"      text={get_artifact_text(a)}")
 
 

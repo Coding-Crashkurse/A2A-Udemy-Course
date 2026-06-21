@@ -1,5 +1,8 @@
+import ipaddress
+import logging
 import uuid
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import httpx
 import uvicorn
@@ -48,9 +51,43 @@ def _first_file_part(parts):
     raise ValueError("no file part found")
 
 
+log = logging.getLogger("06_FileExchange")
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+# A server that fetches a client-supplied URL is a classic SSRF vector: a caller
+# could aim it at internal services (cloud metadata, admin ports, databases…).
+# Always validate the destination BEFORE fetching. This demo pulls from a local
+# file server, so we only *warn* on internal targets — set ENFORCE_SSRF_GUARD to
+# True to reject them the way a production agent must.
+ENFORCE_SSRF_GUARD = False
+
+
+def validate_fetch_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"SSRF guard: refused non-http(s) scheme {parsed.scheme!r}")
+
+    host = parsed.hostname or ""
+    internal = host == "localhost"
+    try:
+        ip = ipaddress.ip_address(host)
+        internal = ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved
+    except ValueError:
+        pass  # a hostname, not a literal IP — a real guard resolves DNS, re-checks
+
+    if internal:
+        msg = f"SSRF guard: client URL targets an internal host ({host!r})"
+        if ENFORCE_SSRF_GUARD:
+            raise ValueError(msg)
+        log.warning("%s - allowed only because this is a localhost demo", msg)
+
+
 class UriUploadExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         file_in = _first_file_part(context.message.parts)
+
+        # SECURITY: validate the client-supplied URL before fetching it (SSRF).
+        validate_fetch_url(file_in.url)
 
         async with httpx.AsyncClient(timeout=10.0) as http:
             r = await http.get(file_in.url)

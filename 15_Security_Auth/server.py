@@ -152,7 +152,9 @@ def build_agent_card() -> AgentCard:
         "bearer": SecurityScheme(http_auth_security_scheme=bearer),
     }
 
-    security_requirements = [SecurityRequirement(schemes={"bearer": StringList(list=[])})]
+    security_requirements = [
+        SecurityRequirement(schemes={"bearer": StringList(list=[])})
+    ]
 
     skills: list[AgentSkill] = [
         AgentSkill(

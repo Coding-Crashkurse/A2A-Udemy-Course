@@ -55,9 +55,7 @@ class Cancelable30sExecutor(AgentExecutor):
 
         await updater.update_status(
             TaskState.TASK_STATE_WORKING,
-            updater.new_agent_message(
-                [Part(text="Accepted. Working... (~30s)")]
-            ),
+            updater.new_agent_message([Part(text="Accepted. Working... (~30s)")]),
         )
 
         for sec in range(1, DURATION_SECONDS + 1):
@@ -86,9 +84,7 @@ class Cancelable30sExecutor(AgentExecutor):
             [Part(text="Result payload (completed)")],
             name="result.txt",
         )
-        await updater.complete(
-            updater.new_agent_message([Part(text="Done ✅")])
-        )
+        await updater.complete(updater.new_agent_message([Part(text="Done ✅")]))
 
         CANCEL_EVENT_BY_TASK_ID.pop(task.id, None)
 
@@ -102,7 +98,11 @@ class Cancelable30sExecutor(AgentExecutor):
             raise InvalidParamsError(message="task not found")
 
         state = task.status.state if task.status else None
-        log.info("cancel: task_id=%s state=%s", task_id, TaskState.Name(state) if state else None)
+        log.info(
+            "cancel: task_id=%s state=%s",
+            task_id,
+            TaskState.Name(state) if state else None,
+        )
 
         if state in {
             TaskState.TASK_STATE_COMPLETED,

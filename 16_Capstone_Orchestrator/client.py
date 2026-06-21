@@ -15,7 +15,9 @@ app = typer.Typer(add_completion=False)
 
 
 @app.callback(invoke_without_command=True)
-def main(text: str = typer.Option("Explain the offside rule in soccer briefly.")) -> None:
+def main(
+    text: str = typer.Option("Explain the offside rule in soccer briefly."),
+) -> None:
     async def _run() -> None:
         timeout = httpx.Timeout(60.0, connect=10.0)
         async with httpx.AsyncClient(timeout=timeout) as http:

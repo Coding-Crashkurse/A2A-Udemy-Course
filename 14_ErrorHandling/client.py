@@ -76,7 +76,9 @@ async def main() -> None:
         client = await create_client(
             card,
             client_config=ClientConfig(
-                supported_protocol_bindings=[card.supported_interfaces[0].protocol_binding],
+                supported_protocol_bindings=[
+                    card.supported_interfaces[0].protocol_binding
+                ],
                 httpx_client=http,
                 streaming=False,
                 polling=False,
@@ -86,7 +88,9 @@ async def main() -> None:
         try:
             # ---- ERROR 1: task-not-found (404 / -32001) ----
             r = await http.get(f"{BASE_URL}/v1/tasks/does-not-exist", headers=HDRS)
-            show_wire("ERROR 1  GET unknown task -> task-not-found", r.status_code, r.text)
+            show_wire(
+                "ERROR 1  GET unknown task -> task-not-found", r.status_code, r.text
+            )
             show_mapping(TaskNotFoundError)
 
             # ---- ERROR 2: unsupported-operation (400 / -32004) ----
@@ -104,7 +108,11 @@ async def main() -> None:
                 json=MessageToDict(stream_req),
                 headers=HDRS,
             )
-            show_wire("ERROR 2  message:stream on non-streaming agent -> unsupported-operation", r.status_code, r.text)
+            show_wire(
+                "ERROR 2  message:stream on non-streaming agent -> unsupported-operation",
+                r.status_code,
+                r.text,
+            )
             show_mapping(UnsupportedOperationError)
 
             # ---- ERROR 3: task-not-cancelable (409 / -32002) ----
@@ -113,7 +121,11 @@ async def main() -> None:
             r = await http.post(
                 f"{BASE_URL}/v1/tasks/{done.id}:cancel", json={}, headers=HDRS
             )
-            show_wire("ERROR 3  cancel a completed task -> task-not-cancelable", r.status_code, r.text)
+            show_wire(
+                "ERROR 3  cancel a completed task -> task-not-cancelable",
+                r.status_code,
+                r.text,
+            )
             show_mapping(TaskNotCancelableError)
 
             # ---- Clean, typed catching with the high-level client ----
@@ -121,7 +133,9 @@ async def main() -> None:
             try:
                 await client.get_task(GetTaskRequest(id="does-not-exist"))
             except TaskNotFoundError as e:
-                print(f"   caught typed TaskNotFoundError: {e.message!r} (handled gracefully)")
+                print(
+                    f"   caught typed TaskNotFoundError: {e.message!r} (handled gracefully)"
+                )
 
         finally:
             await client.close()

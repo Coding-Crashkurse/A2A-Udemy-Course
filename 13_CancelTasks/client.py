@@ -23,7 +23,11 @@ BASE_URL = "http://localhost:8001"
 
 def fmt_task_line(t: Task) -> str:
     state = TaskState.Name(t.status.state) if t.status else "<?>"
-    msg = get_message_text(t.status.message) if t.status and t.status.HasField("message") else ""
+    msg = (
+        get_message_text(t.status.message)
+        if t.status and t.status.HasField("message")
+        else ""
+    )
     return f"taskId={t.id} contextId={t.context_id} state={state} statusText={msg!r}"
 
 
@@ -68,7 +72,11 @@ async def wait_for_state(
     while True:
         last = await client.get_task(GetTaskRequest(id=task_id))
         state = last.status.state
-        text = get_message_text(last.status.message) if last.status.HasField("message") else ""
+        text = (
+            get_message_text(last.status.message)
+            if last.status.HasField("message")
+            else ""
+        )
         elapsed = time.perf_counter() - t0
         print(f"poll t={elapsed:5.1f}s state={TaskState.Name(state)} text={text!r}")
         if state == target:

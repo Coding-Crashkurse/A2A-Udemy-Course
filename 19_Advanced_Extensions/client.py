@@ -24,6 +24,7 @@ def print_language_extension_summary(card: AgentCard) -> None:
     params = {}
     if ext.HasField("params"):
         from google.protobuf.json_format import MessageToDict
+
         params = MessageToDict(ext.params)
     print(
         f"Language extension: supported={params.get('supportedLanguages')} "

@@ -108,9 +108,7 @@ async def main() -> None:
             )
 
             if state2 != TaskState.TASK_STATE_COMPLETED:
-                raise RuntimeError(
-                    f"Expected completed, got {TaskState.Name(state2)}"
-                )
+                raise RuntimeError(f"Expected completed, got {TaskState.Name(state2)}")
 
         finally:
             await client.close()

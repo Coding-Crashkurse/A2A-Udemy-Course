@@ -42,9 +42,7 @@ class LongRunningStreamingExecutor(AgentExecutor):
 
         await updater.update_status(
             TaskState.TASK_STATE_WORKING,
-            updater.new_agent_message(
-                [Part(text="Accepted. Working... (~30s)")]
-            ),
+            updater.new_agent_message([Part(text="Accepted. Working... (~30s)")]),
         )
 
         elapsed = 0
@@ -64,9 +62,7 @@ class LongRunningStreamingExecutor(AgentExecutor):
             name="result.txt",
         )
 
-        await updater.complete(
-            updater.new_agent_message([Part(text="Done ✅")])
-        )
+        await updater.complete(updater.new_agent_message([Part(text="Done ✅")]))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         return

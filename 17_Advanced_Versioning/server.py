@@ -118,7 +118,9 @@ def _security_schemes() -> tuple[dict[str, SecurityScheme], list[SecurityRequire
     return schemes, security
 
 
-def build_public_agent_card(*, base_url: str, agent_version: str, label: str) -> AgentCard:
+def build_public_agent_card(
+    *, base_url: str, agent_version: str, label: str
+) -> AgentCard:
     schemes, security = _security_schemes()
     return AgentCard(
         name=f"AgentCard Versioning Demo ({label})",
@@ -148,7 +150,9 @@ def build_public_agent_card(*, base_url: str, agent_version: str, label: str) ->
     )
 
 
-def build_private_agent_card(*, base_url: str, agent_version: str, label: str) -> AgentCard:
+def build_private_agent_card(
+    *, base_url: str, agent_version: str, label: str
+) -> AgentCard:
     schemes, security = _security_schemes()
     return AgentCard(
         name=f"AgentCard Versioning Demo (Extended, {label})",
