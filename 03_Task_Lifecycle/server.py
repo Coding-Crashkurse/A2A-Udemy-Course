@@ -28,14 +28,24 @@ app = typer.Typer(add_completion=False)
 
 
 class TaskLifecycleExecutor(AgentExecutor):
-    def __init__(self, terminal_state: int) -> None:
-        self.terminal_state = terminal_state
-
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         user_text = context.get_user_input()
 
+        # Demo only: we simulate the agent's *internal* outcome from a keyword
+        # in the message. In a real agent this decision would come from its own
+        # validation logic, an exception, a downstream failure, etc. — never
+        # from the raw user text. This is just a convenient way to watch all
+        # three terminal states without restarting the server.
+        lowered = user_text.lower()
+        if "reject" in lowered:
+            terminal_state = TaskState.TASK_STATE_REJECTED
+        elif "fail" in lowered:
+            terminal_state = TaskState.TASK_STATE_FAILED
+        else:
+            terminal_state = TaskState.TASK_STATE_COMPLETED
+
         artifacts: list[Artifact] = []
-        if self.terminal_state == TaskState.TASK_STATE_COMPLETED:
+        if terminal_state == TaskState.TASK_STATE_COMPLETED:
             # The deliverable lives in an ARTIFACT. The status message below only
             # talks *about* the outcome — it is not the result itself.
             text = "Task completed. The result is attached as an artifact."
@@ -45,10 +55,9 @@ class TaskLifecycleExecutor(AgentExecutor):
                     name="result",
                     description="The task's actual output.",
                     parts=[Part(text=f"Echo: {user_text}")],
-                    metadata={"media_type": "text/plain"},
                 )
             ]
-        elif self.terminal_state == TaskState.TASK_STATE_REJECTED:
+        elif terminal_state == TaskState.TASK_STATE_REJECTED:
             text = f"Rejected Task: Validation failed (demo). Input was: {user_text}"
         else:
             text = f"Failed Task: Unexpected error (demo). Input was: {user_text}"
@@ -62,12 +71,12 @@ class TaskLifecycleExecutor(AgentExecutor):
         task = Task(
             id=context.task_id,
             context_id=context.context_id,
-            status=TaskStatus(state=self.terminal_state, message=agent_msg),
+            status=TaskStatus(state=terminal_state, message=agent_msg),
             history=[context.message, agent_msg],
             artifacts=artifacts,
             metadata={
                 "section": "03_Tasks",
-                "terminal_state": TaskState.Name(self.terminal_state),
+                "terminal_state": TaskState.Name(terminal_state),
             },
         )
 
@@ -78,22 +87,10 @@ class TaskLifecycleExecutor(AgentExecutor):
 
 
 @app.callback(invoke_without_command=True)
-def main(
-    completed: bool = typer.Option(False),
-    rejected: bool = typer.Option(False),
-    failed: bool = typer.Option(False),
-) -> None:
-    terminal_state = (
-        TaskState.TASK_STATE_FAILED
-        if failed
-        else TaskState.TASK_STATE_REJECTED
-        if rejected
-        else TaskState.TASK_STATE_COMPLETED
-    )
-
+def main() -> None:
     agent_card = AgentCard(
-        name="03_Tasks - Fixed Lifecycle Demo Agent (REST)",
-        description="REST-only demo: always returns a Task in a fixed terminal state.",
+        name="03_Tasks - Lifecycle Demo Agent (REST)",
+        description="REST-only demo: returns a Task whose terminal state depends on the input.",
         version="1.0.x-demo",
         supported_interfaces=[
             AgentInterface(
@@ -108,7 +105,7 @@ def main(
     )
 
     handler = DefaultRequestHandler(
-        agent_executor=TaskLifecycleExecutor(terminal_state=terminal_state),
+        agent_executor=TaskLifecycleExecutor(),
         task_store=InMemoryTaskStore(),
         agent_card=agent_card,
     )
