@@ -31,11 +31,6 @@ class TaskLifecycleExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         user_text = context.get_user_input()
 
-        # Demo only: we simulate the agent's *internal* outcome from a keyword
-        # in the message. In a real agent this decision would come from its own
-        # validation logic, an exception, a downstream failure, etc. — never
-        # from the raw user text. This is just a convenient way to watch all
-        # three terminal states without restarting the server.
         lowered = user_text.lower()
         if "reject" in lowered:
             terminal_state = TaskState.TASK_STATE_REJECTED
@@ -46,8 +41,6 @@ class TaskLifecycleExecutor(AgentExecutor):
 
         artifacts: list[Artifact] = []
         if terminal_state == TaskState.TASK_STATE_COMPLETED:
-            # The deliverable lives in an ARTIFACT. The status message below only
-            # talks *about* the outcome — it is not the result itself.
             text = "Task completed. The result is attached as an artifact."
             artifacts = [
                 Artifact(
