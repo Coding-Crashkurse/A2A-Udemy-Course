@@ -26,17 +26,10 @@ class EchoExecutor(AgentExecutor):
 
         user_text = context.get_user_input()
         logger.info(f">>> [2] INPUT PARSED: User said '{user_text}'")
-        logger.info(
-            f">>> [2a] IDs: TaskID={context.task_id}, ContextID={context.context_id}"
-        )
 
         response_text = f"Echo: {user_text}"
 
-        response_message = new_text_message(
-            text=response_text,
-            context_id=context.context_id,
-            task_id=context.task_id,
-        )
+        response_message = new_text_message(text=response_text)
 
         logger.info(f">>> [3] RESPONSE CREATED: '{response_text}'")
 
