@@ -15,18 +15,11 @@ class EchoExecutor(AgentExecutor):
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         user_text = context.get_user_input()
-        response = new_text_message(
-            text=f"Echo: {user_text}",
-            context_id=context.context_id,
-            task_id=context.task_id,
-        )
+        response = new_text_message(text=f"Echo: {user_text}")
         await event_queue.enqueue_event(response)
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        logger.warning(
-            "Cancel called for task_id=%s, no cancellation logic implemented",
-            context.task_id,
-        )
+        logger.warning("Cancel called, no cancellation logic implemented")
 
 
 def build_agent_card(
