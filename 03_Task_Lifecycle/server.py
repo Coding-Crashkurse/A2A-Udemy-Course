@@ -62,19 +62,31 @@ class TaskLifecycleExecutor(AgentExecutor):
             )
             await updater.complete(
                 updater.new_agent_message(
-                    [Part(text="Task completed. The result is attached as an artifact.")]
+                    [
+                        Part(
+                            text="Task completed. The result is attached as an artifact."
+                        )
+                    ]
                 )
             )
         elif terminal_state == TaskState.TASK_STATE_REJECTED:
             await updater.reject(
                 updater.new_agent_message(
-                    [Part(text=f"Rejected Task: Validation failed (demo). Input was: {user_text}")]
+                    [
+                        Part(
+                            text=f"Rejected Task: Validation failed (demo). Input was: {user_text}"
+                        )
+                    ]
                 )
             )
         else:
             await updater.failed(
                 updater.new_agent_message(
-                    [Part(text=f"Failed Task: Unexpected error (demo). Input was: {user_text}")]
+                    [
+                        Part(
+                            text=f"Failed Task: Unexpected error (demo). Input was: {user_text}"
+                        )
+                    ]
                 )
             )
 

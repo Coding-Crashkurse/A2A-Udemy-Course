@@ -45,7 +45,13 @@ def main(
                     if reply.HasField("task"):
                         for p in reply.task.status.message.parts:
                             if p.HasField("data"):
-                                print(json.dumps(MessageToDict(p.data), ensure_ascii=False, indent=2))
+                                print(
+                                    json.dumps(
+                                        MessageToDict(p.data),
+                                        ensure_ascii=False,
+                                        indent=2,
+                                    )
+                                )
                         break
             finally:
                 await client.close()

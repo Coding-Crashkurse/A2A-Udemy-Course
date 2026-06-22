@@ -52,7 +52,7 @@ class ConfigurationDemoExecutor(AgentExecutor):
             history_length = cfg.history_length
         if history_length is not None and history_length < 0:
             raise InvalidParamsError(message="historyLength must be >= 0")
-        
+
         user_text = context.get_user_input()
 
         log.info(
