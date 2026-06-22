@@ -47,7 +47,6 @@ class ConfigurationDemoExecutor(AgentExecutor):
             if cfg and cfg.return_immediately is not None
             else False
         )
-        blocking = not return_immediately
         history_length = cfg.history_length if cfg else None
         if history_length is not None and history_length < 0:
             raise InvalidParamsError(message="historyLength must be >= 0")
@@ -55,10 +54,10 @@ class ConfigurationDemoExecutor(AgentExecutor):
         user_text = context.get_user_input()
 
         log.info(
-            "task_id=%s context_id=%s blocking=%s history_length=%r",
+            "task_id=%s context_id=%s return_immediately=%s history_length=%r",
             context.task_id,
             context.context_id,
-            blocking,
+            return_immediately,
             history_length,
         )
 
@@ -76,7 +75,7 @@ class ConfigurationDemoExecutor(AgentExecutor):
             artifacts=[],
             metadata={
                 "section": "04_Configuration",
-                "blocking": "true" if blocking else "false",
+                "return_immediately": "true" if return_immediately else "false",
             },
         )
         await event_queue.enqueue_event(initial_task)
@@ -103,7 +102,7 @@ def main(
 ) -> None:
     card = AgentCard(
         name="04_Configuration Demo Agent (REST)",
-        description="Shows blocking + historyLength.",
+        description="Shows return_immediately + historyLength.",
         version="0.4.0-demo",
         supported_interfaces=[
             AgentInterface(

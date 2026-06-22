@@ -49,10 +49,10 @@ def print_task(task: Task) -> None:
 @app.callback(invoke_without_command=True)
 def main(
     text: str = typer.Option("Hello from 04_Configuration!", help="User message"),
-    blocking: bool = typer.Option(
-        True,
-        "--blocking/--no-blocking",
-        help="SendMessageConfiguration: wait for terminal vs return early (working).",
+    return_immediately: bool = typer.Option(
+        False,
+        "--return-immediately/--no-return-immediately",
+        help="SendMessageConfiguration: return early in WORKING vs wait for terminal.",
     ),
     history_length: int | None = typer.Option(
         None,
@@ -75,7 +75,7 @@ def main(
 
             try:
                 cfg = SendMessageConfiguration(
-                    return_immediately=not blocking,
+                    return_immediately=return_immediately,
                     history_length=history_length,
                 )
 
@@ -94,7 +94,7 @@ def main(
                 print(
                     "\n"
                     f"returned_after={dt:.2f}s\n"
-                    f"blocking={blocking}\n"
+                    f"return_immediately={return_immediately}\n"
                     f"history_length={history_length}\n"
                 )
                 print_task(task)
