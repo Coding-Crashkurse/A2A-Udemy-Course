@@ -21,8 +21,6 @@ app = typer.Typer(add_completion=False)
 
 
 def print_task(task: Task) -> None:
-    print(f"taskId={task.id}")
-    print(f"contextId={task.context_id}")
     print(f"state={TaskState.Name(task.status.state)}")
 
     print(f"historyCount={len(task.history)}")
