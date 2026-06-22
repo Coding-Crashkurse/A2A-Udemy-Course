@@ -42,7 +42,7 @@ def main(
                     )
                 )
                 async for reply in client.send_message(request):
-                    if reply.HasField("task"):
+                    # if reply.HasField("task"):
                         for p in reply.task.status.message.parts:
                             if p.HasField("data"):
                                 print(
