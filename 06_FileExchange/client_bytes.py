@@ -20,8 +20,9 @@ if not UPLOAD_FILE.exists():
     )
 
 
-def build_inline_message(raw: bytes) -> Message:
-    return Message(
+async def main() -> None:
+    raw = UPLOAD_FILE.read_bytes()
+    msg = Message(
         role=Role.ROLE_USER,
         message_id=str(uuid.uuid4()),
         parts=[
@@ -32,11 +33,6 @@ def build_inline_message(raw: bytes) -> Message:
             )
         ],
     )
-
-
-async def main() -> None:
-    raw = UPLOAD_FILE.read_bytes()
-    msg = build_inline_message(raw)
 
     async with httpx.AsyncClient(timeout=30) as http:
         card = await A2ACardResolver(http, BASE_URL).get_agent_card()
