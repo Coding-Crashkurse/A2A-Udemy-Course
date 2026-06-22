@@ -52,7 +52,7 @@ class ConfigurationDemoExecutor(AgentExecutor):
             history_length = cfg.history_length
         if history_length is not None and history_length < 0:
             raise InvalidParamsError(message="historyLength must be >= 0")
-
+        
         user_text = context.get_user_input()
 
         log.info(
@@ -82,13 +82,19 @@ class ConfigurationDemoExecutor(AgentExecutor):
         )
         await event_queue.enqueue_event(initial_task)
 
-        await asyncio.sleep(self.delay_seconds)
-
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
+
+        steps = 5
+        for i in range(1, steps + 1):
+            await asyncio.sleep(self.delay_seconds / steps)
+            await updater.update_status(
+                TaskState.TASK_STATE_WORKING,
+                message=updater.new_agent_message([Part(text=f"step {i}/{steps}")]),
+            )
+
         await updater.add_artifact(
             [Part(text=f"Echo: {user_text}")],
             name="result.txt",
-            metadata={"media_type": "text/plain"},
         )
         await updater.complete(
             updater.new_agent_message([Part(text=f"Done. Echo: {user_text}")])
