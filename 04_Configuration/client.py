@@ -86,11 +86,8 @@ def main(
 
                 t0 = time.perf_counter()
 
-                last_task: Task | None = None
-                async for reply in client.send_message(request):
-                    if reply.HasField("task"):
-                        last_task = reply.task
-                        break
+                [reply] = [r async for r in client.send_message(request)]
+                task = reply.task
 
                 dt = time.perf_counter() - t0
 
@@ -100,8 +97,7 @@ def main(
                     f"blocking={blocking}\n"
                     f"history_length={history_length}\n"
                 )
-                if last_task is not None:
-                    print_task(last_task)
+                print_task(task)
 
             finally:
                 await client.close()

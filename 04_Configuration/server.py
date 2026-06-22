@@ -63,19 +63,15 @@ class ConfigurationDemoExecutor(AgentExecutor):
         )
 
         started_msg = new_text_message(
-            text="Working… (step 1/2)",
+            text="Working...",
             context_id=context.context_id,
             task_id=context.task_id,
         )
 
-        # Enqueue the task ONCE, in the WORKING state. This single snapshot is
-        # exactly what a return_immediately (fire-and-forget) client gets back.
         initial_task = Task(
             id=context.task_id,
             context_id=context.context_id,
             status=TaskStatus(state=TaskState.TASK_STATE_WORKING, message=started_msg),
-            # Only the user message is "past" history; "Working…" is the *current*
-            # status. The SDK moves it into history on the next status transition.
             history=[context.message],
             artifacts=[],
             metadata={
@@ -85,14 +81,8 @@ class ConfigurationDemoExecutor(AgentExecutor):
         )
         await event_queue.enqueue_event(initial_task)
 
-        # Simulated work.
         await asyncio.sleep(self.delay_seconds)
 
-        # Drive the task to its terminal state with UPDATE events — NOT a second
-        # full Task. Re-enqueuing a Task with the same id is ignored as a
-        # duplicate ("Task already exists"), which would leave blocking callers
-        # stuck on WORKING. The deliverable goes into an artifact; the final
-        # status message only talks *about* the work.
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
         await updater.add_artifact(
             [Part(text=f"Echo: {user_text}")],
@@ -100,10 +90,8 @@ class ConfigurationDemoExecutor(AgentExecutor):
             metadata={"media_type": "text/plain"},
         )
         await updater.complete(
-            updater.new_agent_message([Part(text=f"Done ✅ Echo: {user_text}")])
+            updater.new_agent_message([Part(text=f"Done. Echo: {user_text}")])
         )
-        # historyLength is applied to the response by the request handler itself
-        # (DefaultRequestHandler -> apply_history_length), so we don't here.
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         return
