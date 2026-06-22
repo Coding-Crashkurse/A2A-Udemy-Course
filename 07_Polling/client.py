@@ -40,7 +40,6 @@ async def main() -> None:
                 ],
                 httpx_client=http,
                 polling=True,
-                streaming=False,
             ),
         )
 

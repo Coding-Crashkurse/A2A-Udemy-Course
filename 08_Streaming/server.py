@@ -1,9 +1,9 @@
 import asyncio
+import uuid
 
 import uvicorn
 from fastapi import FastAPI
 
-from a2a.helpers import new_task_from_user_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
@@ -13,16 +13,19 @@ from a2a.types import (
     AgentCapabilities,
     AgentCard,
     AgentInterface,
+    Message,
     Part,
+    Role,
     TaskState,
 )
 from a2a.utils import TransportProtocol
+from a2a.helpers import new_task_from_user_message
 
 HOST = "localhost"
 PORT = 8001
 
 
-class StreamingDemoExecutor(AgentExecutor):
+class DemoExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         task = context.current_task or new_task_from_user_message(context.message)
 
@@ -31,19 +34,37 @@ class StreamingDemoExecutor(AgentExecutor):
 
         await updater.update_status(
             TaskState.TASK_STATE_WORKING,
-            updater.new_agent_message([Part(text="Working 1/3...")]),
+            Message(
+                role=Role.ROLE_AGENT,
+                message_id=str(uuid.uuid4()),
+                context_id=task.context_id,
+                task_id=task.id,
+                parts=[Part(text="Working 1/3...")],
+            ),
         )
         await asyncio.sleep(2.0)
 
         await updater.update_status(
             TaskState.TASK_STATE_WORKING,
-            updater.new_agent_message([Part(text="Working 2/3...")]),
+            Message(
+                role=Role.ROLE_AGENT,
+                message_id=str(uuid.uuid4()),
+                context_id=task.context_id,
+                task_id=task.id,
+                parts=[Part(text="Working 2/3...")],
+            ),
         )
         await asyncio.sleep(2.0)
 
         await updater.update_status(
             TaskState.TASK_STATE_WORKING,
-            updater.new_agent_message([Part(text="Working 3/3...")]),
+            Message(
+                role=Role.ROLE_AGENT,
+                message_id=str(uuid.uuid4()),
+                context_id=task.context_id,
+                task_id=task.id,
+                parts=[Part(text="Working 3/3...")],
+            ),
         )
         await asyncio.sleep(2.0)
 
@@ -59,8 +80,8 @@ class StreamingDemoExecutor(AgentExecutor):
 
 
 card = AgentCard(
-    name="Streaming Demo Agent (REST + SSE)",
-    description="SSE streaming demo: 3 progress updates + 1 text artifact.",
+    name="Demo Agent (REST)",
+    description="Demo: 3 progress updates + 1 text artifact.",
     version="0.4.0-demo",
     supported_interfaces=[
         AgentInterface(
@@ -75,7 +96,7 @@ card = AgentCard(
 )
 
 handler = DefaultRequestHandler(
-    agent_executor=StreamingDemoExecutor(),
+    agent_executor=DemoExecutor(),
     task_store=InMemoryTaskStore(),
     agent_card=card,
 )

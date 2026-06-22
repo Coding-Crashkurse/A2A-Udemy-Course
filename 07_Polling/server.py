@@ -25,7 +25,7 @@ HOST = "localhost"
 PORT = 8001
 
 
-class PollingDemoExecutor(AgentExecutor):
+class DemoExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         task = context.current_task or new_task_from_user_message(context.message)
 
@@ -42,8 +42,7 @@ class PollingDemoExecutor(AgentExecutor):
                 parts=[Part(text="Working 1/3...")],
             ),
         )
-
-        await asyncio.sleep(5.0)
+        await asyncio.sleep(2.0)
 
         await updater.update_status(
             TaskState.TASK_STATE_WORKING,
@@ -55,8 +54,7 @@ class PollingDemoExecutor(AgentExecutor):
                 parts=[Part(text="Working 2/3...")],
             ),
         )
-
-        await asyncio.sleep(5.0)
+        await asyncio.sleep(2.0)
 
         await updater.update_status(
             TaskState.TASK_STATE_WORKING,
@@ -68,11 +66,10 @@ class PollingDemoExecutor(AgentExecutor):
                 parts=[Part(text="Working 3/3...")],
             ),
         )
-
-        await asyncio.sleep(5.0)
+        await asyncio.sleep(2.0)
 
         await updater.add_artifact(
-            [Part(text="Demo artifact text: Hello from PollingDemoExecutor ✅")],
+            [Part(text="Demo artifact text ✅")],
             name="result.txt",
         )
 
@@ -83,8 +80,8 @@ class PollingDemoExecutor(AgentExecutor):
 
 
 card = AgentCard(
-    name="Polling Demo Agent (REST)",
-    description="Minimal long-running task + polling via GET /v1/tasks/{id}.",
+    name="Demo Agent (REST)",
+    description="Demo: 3 progress updates + 1 text artifact.",
     version="0.4.0-demo",
     supported_interfaces=[
         AgentInterface(
@@ -99,7 +96,7 @@ card = AgentCard(
 )
 
 handler = DefaultRequestHandler(
-    agent_executor=PollingDemoExecutor(),
+    agent_executor=DemoExecutor(),
     task_store=InMemoryTaskStore(),
     agent_card=card,
 )
