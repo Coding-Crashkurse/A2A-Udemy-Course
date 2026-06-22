@@ -2,17 +2,15 @@ import typer
 import uvicorn
 from fastapi import FastAPI
 
-from a2a.helpers import new_text_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_agent_card_routes, create_rest_routes
-from a2a.server.tasks import InMemoryTaskStore
+from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
     AgentInterface,
-    Artifact,
     Part,
     Task,
     TaskState,
@@ -39,41 +37,46 @@ class TaskLifecycleExecutor(AgentExecutor):
         else:
             terminal_state = TaskState.TASK_STATE_COMPLETED
 
-        artifacts: list[Artifact] = []
-        if terminal_state == TaskState.TASK_STATE_COMPLETED:
-            text = "Task completed. The result is attached as an artifact."
-            artifacts = [
-                Artifact(
-                    artifact_id="result",
-                    name="result",
-                    description="The task's actual output.",
-                    parts=[Part(text=f"Echo: {user_text}")],
-                )
-            ]
-        elif terminal_state == TaskState.TASK_STATE_REJECTED:
-            text = f"Rejected Task: Validation failed (demo). Input was: {user_text}"
-        else:
-            text = f"Failed Task: Unexpected error (demo). Input was: {user_text}"
-
-        agent_msg = new_text_message(
-            text=text,
-            context_id=context.context_id,
-            task_id=context.task_id,
-        )
-
-        task = Task(
+        submitted_task = Task(
             id=context.task_id,
             context_id=context.context_id,
-            status=TaskStatus(state=terminal_state, message=agent_msg),
-            history=[context.message, agent_msg],
-            artifacts=artifacts,
+            status=TaskStatus(state=TaskState.TASK_STATE_SUBMITTED),
+            history=[context.message],
             metadata={
                 "section": "03_Tasks",
                 "terminal_state": TaskState.Name(terminal_state),
             },
         )
+        await event_queue.enqueue_event(submitted_task)
 
-        await event_queue.enqueue_event(task)
+        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
+
+        await updater.start_work(
+            updater.new_agent_message([Part(text="Working on your task...")])
+        )
+
+        if terminal_state == TaskState.TASK_STATE_COMPLETED:
+            await updater.add_artifact(
+                [Part(text=f"Echo: {user_text}")],
+                name="result",
+            )
+            await updater.complete(
+                updater.new_agent_message(
+                    [Part(text="Task completed. The result is attached as an artifact.")]
+                )
+            )
+        elif terminal_state == TaskState.TASK_STATE_REJECTED:
+            await updater.reject(
+                updater.new_agent_message(
+                    [Part(text=f"Rejected Task: Validation failed (demo). Input was: {user_text}")]
+                )
+            )
+        else:
+            await updater.failed(
+                updater.new_agent_message(
+                    [Part(text=f"Failed Task: Unexpected error (demo). Input was: {user_text}")]
+                )
+            )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         pass
