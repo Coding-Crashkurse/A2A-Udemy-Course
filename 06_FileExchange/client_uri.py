@@ -18,7 +18,7 @@ DOWNLOAD_FILE = Path("download.txt")
 
 if not UPLOAD_FILE.exists():
     raise SystemExit(
-        "upload.txt fehlt. Bitte vorher anlegen mit Inhalt:\n"
+        "upload.txt is missing. Please create it first with the content:\n"
         "I will be uploaded and changed"
     )
 
