@@ -42,8 +42,9 @@ def main(
                     )
                 )
                 async for reply in client.send_message(request):
-                    # if reply.HasField("task"):
-                        for p in reply.task.status.message.parts:
+                    task = reply.task if reply.HasField("task") else reply
+                    for a in task.artifacts:
+                        for p in a.parts:
                             if p.HasField("data"):
                                 print(
                                     json.dumps(
@@ -52,7 +53,7 @@ def main(
                                         indent=2,
                                     )
                                 )
-                        break
+                    break
             finally:
                 await client.close()
 
