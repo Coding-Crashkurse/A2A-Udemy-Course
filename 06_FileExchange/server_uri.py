@@ -54,11 +54,6 @@ def _first_file_part(parts):
 log = logging.getLogger("06_FileExchange")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-# A server that fetches a client-supplied URL is a classic SSRF vector: a caller
-# could aim it at internal services (cloud metadata, admin ports, databases…).
-# Always validate the destination BEFORE fetching. This demo pulls from a local
-# file server, so we only *warn* on internal targets — set ENFORCE_SSRF_GUARD to
-# True to reject them the way a production agent must.
 ENFORCE_SSRF_GUARD = False
 
 
@@ -73,7 +68,7 @@ def validate_fetch_url(url: str) -> None:
         ip = ipaddress.ip_address(host)
         internal = ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved
     except ValueError:
-        pass  # a hostname, not a literal IP — a real guard resolves DNS, re-checks
+        pass
 
     if internal:
         msg = f"SSRF guard: client URL targets an internal host ({host!r})"
@@ -86,7 +81,6 @@ class UriUploadExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         file_in = _first_file_part(context.message.parts)
 
-        # SECURITY: validate the client-supplied URL before fetching it (SSRF).
         validate_fetch_url(file_in.url)
 
         async with httpx.AsyncClient(timeout=10.0) as http:
