@@ -25,25 +25,13 @@ def print_task(task: Task) -> None:
     print(f"contextId={task.context_id}")
     print(f"state={TaskState.Name(task.status.state)}")
 
-    if task.status.message is not None:
-        print(f"statusText={get_message_text(task.status.message)}")
+    print(f"historyCount={len(task.history)}")
+    for i, m in enumerate(task.history):
+        print(f"  [{i}] role={m.role} text={get_message_text(m)}")
 
-    if not task.history:
-        print("history=<empty>")
-    else:
-        print(f"historyCount={len(task.history)}")
-        for i, m in enumerate(task.history):
-            print(f"  [{i}] role={m.role} text={get_message_text(m)}")
-
-    if not task.artifacts:
-        print("artifacts=<empty>")
-    else:
-        print(f"artifactsCount={len(task.artifacts)}")
-        for i, a in enumerate(task.artifacts):
-            print(
-                f"  [{i}] name={a.name} meta={dict(a.metadata) if a.metadata else {}}"
-            )
-            print(f"      text={get_artifact_text(a)}")
+    print(f"artifactsCount={len(task.artifacts)}")
+    for i, a in enumerate(task.artifacts):
+        print(f"  [{i}] name={a.name} text={get_artifact_text(a)}")
 
 
 @app.callback(invoke_without_command=True)
