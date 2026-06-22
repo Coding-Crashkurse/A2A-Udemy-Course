@@ -38,8 +38,6 @@ class ConfigurationDemoExecutor(AgentExecutor):
         self.delay_seconds = delay_seconds
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        if context.message is None:
-            raise InvalidParamsError(message="missing message")
 
         cfg = context.configuration
         return_immediately = (
