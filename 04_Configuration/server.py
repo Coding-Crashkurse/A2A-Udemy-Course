@@ -40,12 +40,16 @@ class ConfigurationDemoExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
 
         cfg = context.configuration
-        return_immediately = (
-            bool(cfg.return_immediately)
-            if cfg and cfg.return_immediately is not None
-            else False
-        )
-        history_length = cfg.history_length if cfg else None
+        if cfg is None:
+            return_immediately = False
+            history_length = None
+        else:
+            return_immediately = (
+                bool(cfg.return_immediately)
+                if cfg.return_immediately is not None
+                else False
+            )
+            history_length = cfg.history_length
         if history_length is not None and history_length < 0:
             raise InvalidParamsError(message="historyLength must be >= 0")
 
