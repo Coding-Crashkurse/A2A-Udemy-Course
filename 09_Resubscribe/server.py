@@ -1,10 +1,9 @@
 import asyncio
-import logging
+import uuid
 
 import uvicorn
 from fastapi import FastAPI
 
-from a2a.helpers import new_task_from_user_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
@@ -14,67 +13,79 @@ from a2a.types import (
     AgentCapabilities,
     AgentCard,
     AgentInterface,
+    Message,
     Part,
+    Role,
     TaskState,
 )
 from a2a.utils import TransportProtocol
+from a2a.helpers import new_task_from_user_message
 
 HOST = "localhost"
 PORT = 8001
-BASE_URL = f"http://{HOST}:{PORT}"
-
-TOTAL_SECONDS = 30
-TICK_SECONDS = 1
-
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-log = logging.getLogger("11_SubscribeToTask")
 
 
-class LongRunningStreamingExecutor(AgentExecutor):
+class DemoExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         task = context.current_task or new_task_from_user_message(context.message)
 
         await event_queue.enqueue_event(task)
-
         updater = TaskUpdater(event_queue, task.id, task.context_id)
-
-        log.info("execute task_id=%s context_id=%s", task.id, task.context_id)
 
         await updater.update_status(
             TaskState.TASK_STATE_WORKING,
-            updater.new_agent_message([Part(text="Accepted. Working... (~30s)")]),
+            Message(
+                role=Role.ROLE_AGENT,
+                message_id=str(uuid.uuid4()),
+                context_id=task.context_id,
+                task_id=task.id,
+                parts=[Part(text="Working 1/3...")],
+            ),
         )
+        await asyncio.sleep(10.0)
 
-        elapsed = 0
-        while elapsed < TOTAL_SECONDS:
-            await asyncio.sleep(TICK_SECONDS)
-            elapsed += TICK_SECONDS
+        await updater.update_status(
+            TaskState.TASK_STATE_WORKING,
+            Message(
+                role=Role.ROLE_AGENT,
+                message_id=str(uuid.uuid4()),
+                context_id=task.context_id,
+                task_id=task.id,
+                parts=[Part(text="Working 2/3...")],
+            ),
+        )
+        await asyncio.sleep(10.0)
 
-            await updater.update_status(
-                TaskState.TASK_STATE_WORKING,
-                updater.new_agent_message(
-                    [Part(text=f"Progress: {elapsed}/{TOTAL_SECONDS}s")]
-                ),
-            )
+        await updater.update_status(
+            TaskState.TASK_STATE_WORKING,
+            Message(
+                role=Role.ROLE_AGENT,
+                message_id=str(uuid.uuid4()),
+                context_id=task.context_id,
+                task_id=task.id,
+                parts=[Part(text="Working 3/3...")],
+            ),
+        )
+        await asyncio.sleep(10.0)
 
         await updater.add_artifact(
-            [Part(text="Result payload for SubscribeToTask demo ✅")],
+            [Part(text="Demo artifact text ✅")],
             name="result.txt",
         )
 
-        await updater.complete(updater.new_agent_message([Part(text="Done ✅")]))
+        await updater.complete()
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         return
 
 
 card = AgentCard(
-    name="11 SubscribeToTask Demo Agent (REST + SSE)",
-    description="Long-running streaming task + resubscribe support (SubscribeToTask).",
-    version="0.11.0-demo",
+    name="Demo Agent (REST)",
+    description="Demo: 3 progress updates + 1 text artifact.",
+    version="0.4.0-demo",
     supported_interfaces=[
         AgentInterface(
-            url=BASE_URL,
+            url=f"http://{HOST}:{PORT}",
             protocol_binding=TransportProtocol.HTTP_JSON,
         ),
     ],
@@ -85,7 +96,7 @@ card = AgentCard(
 )
 
 handler = DefaultRequestHandler(
-    agent_executor=LongRunningStreamingExecutor(),
+    agent_executor=DemoExecutor(),
     task_store=InMemoryTaskStore(),
     agent_card=card,
 )
