@@ -26,24 +26,9 @@ PORT = 8001
 BASE_URL = f"http://{HOST}:{PORT}"
 
 FAKE_TICKETS = [
-    {
-        "id": "INC-1001",
-        "title": "VPN login fails",
-        "status": "open",
-        "priority": "high",
-    },
-    {
-        "id": "INC-1002",
-        "title": "Laptop battery swelling",
-        "status": "open",
-        "priority": "medium",
-    },
-    {
-        "id": "INC-1003",
-        "title": "Access request: Jira",
-        "status": "closed",
-        "priority": "low",
-    },
+    {"id": "INC-1001", "title": "VPN login fails", "status": "open", "priority": "high"},
+    {"id": "INC-1002", "title": "Laptop battery swelling", "status": "open", "priority": "medium"},
+    {"id": "INC-1003", "title": "Access request: Jira", "status": "closed", "priority": "low"},
 ]
 
 
@@ -53,11 +38,7 @@ class StructuredDataExecutor(AgentExecutor):
             raise InvalidParamsError(message="missing message")
 
         request = next(
-            (
-                MessageToDict(p.data)
-                for p in context.message.parts
-                if p.HasField("data")
-            ),
+            (MessageToDict(p.data) for p in context.message.parts if p.HasField("data")),
             None,
         )
         if request is None:
@@ -73,10 +54,7 @@ class StructuredDataExecutor(AgentExecutor):
 
         agent_msg = new_message(
             parts=[
-                Part(
-                    text=f"Found {len(tickets)} '{status}' tickets. Data is in the DataPart."
-                ),
-                Part(data=payload),
+                Part(text=f"Found {len(tickets)} '{status}' tickets. Data is in the DataPart.")
             ],
             context_id=context.context_id,
             task_id=context.task_id,
