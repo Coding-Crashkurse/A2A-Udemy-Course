@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 
 import httpx
 import uvicorn
@@ -97,16 +98,18 @@ handler = DefaultRequestHandler(
     push_sender=push_sender,
 )
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await push_http.aclose()
+
+
+app = FastAPI(lifespan=lifespan)
 for route in create_agent_card_routes(agent_card=card):
     app.router.routes.append(route)
 for route in create_rest_routes(request_handler=handler):
     app.router.routes.append(route)
-
-
-@app.on_event("shutdown")
-async def _shutdown() -> None:
-    await push_http.aclose()
 
 
 if __name__ == "__main__":

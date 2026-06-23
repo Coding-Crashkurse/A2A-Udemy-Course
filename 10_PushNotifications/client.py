@@ -44,22 +44,20 @@ async def main() -> None:
 
             request = SendMessageRequest(
                 message=msg,
-                configuration=SendMessageConfiguration(return_immediately=True),
+                configuration=SendMessageConfiguration(
+                    return_immediately=True,
+                    task_push_notification_config=TaskPushNotificationConfig(
+                        id=str(uuid.uuid4()),
+                        url=WEBHOOK_URL,
+                        token="demo-token",
+                    ),
+                ),
             )
             task = None
             async for reply in client.send_message(request):
                 if reply.HasField("task"):
                     task = reply.task
                     break
-
-            await client.create_task_push_notification_config(
-                TaskPushNotificationConfig(
-                    task_id=task.id,
-                    id=str(uuid.uuid4()),
-                    url=WEBHOOK_URL,
-                    token="demo-token",
-                )
-            )
 
             print(
                 f"taskId={task.id} contextId={task.context_id} state={TaskState.Name(task.status.state)}"
