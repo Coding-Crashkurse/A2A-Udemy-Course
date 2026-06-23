@@ -60,7 +60,7 @@ class PushOnlyDemoExecutor(AgentExecutor):
         )
 
         await updater.complete(
-            updater.new_agent_message([Part(text="Task ist beendet ✅")])
+            updater.new_agent_message([Part(text="Task is finished ✅")])
         )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
