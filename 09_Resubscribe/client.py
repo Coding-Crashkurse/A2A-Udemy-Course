@@ -58,7 +58,8 @@ async def main() -> None:
             )
 
             task_id = None
-            async for reply in client.send_message(SendMessageRequest(message=msg)):
+            stream = client.send_message(SendMessageRequest(message=msg))
+            async for reply in stream:
                 show(reply)
                 if task_id is None:
                     if reply.HasField("task"):
@@ -67,6 +68,10 @@ async def main() -> None:
                         task_id = reply.status_update.task_id
                     if task_id is not None:
                         break
+
+            await stream.aclose()
+
+            await asyncio.sleep(5)
 
             print(f"\n--- resubscribe to {task_id} ---\n")
             async for reply in client.subscribe(SubscribeToTaskRequest(id=task_id)):
