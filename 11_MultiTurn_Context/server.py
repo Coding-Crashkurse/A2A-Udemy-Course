@@ -1,4 +1,3 @@
-import asyncio
 import logging
 
 import uvicorn
@@ -23,90 +22,59 @@ HOST = "localhost"
 PORT = 8001
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-log = logging.getLogger("06_MultiTurn")
-
-PHASE_BY_TASK_ID: dict[str, str] = {}
+log = logging.getLogger("11_MultiTurn")
 
 
-class MultiTurnStreamingExecutor(AgentExecutor):
+class MultiTurnExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        is_new_task = context.current_task is None
-        task = context.current_task or new_task_from_user_message(context.message)
+        task = context.current_task
 
-        if is_new_task:
+        if task is None:
+            task = new_task_from_user_message(context.message)
             await event_queue.enqueue_event(task)
 
-        updater = TaskUpdater(event_queue, task.id, task.context_id)
-
-        phase = PHASE_BY_TASK_ID.get(task.id)
-        log.info(
-            "execute task_id=%s context_id=%s is_new=%s phase=%r",
-            task.id,
-            task.context_id,
-            is_new_task,
-            phase,
-        )
-
-        if phase is None:
-            PHASE_BY_TASK_ID[task.id] = "awaiting_name"
+            updater = TaskUpdater(event_queue, task.id, task.context_id)
             log.info("TURN 1 -> input_required | task_id=%s", task.id)
-
-            await updater.update_status(
-                TaskState.TASK_STATE_WORKING,
-                updater.new_agent_message(
-                    [Part(text="Okay — kurze Rückfrage bevor ich weiter mache…")]
-                ),
-            )
-            await asyncio.sleep(1.0)
-
             await updater.update_status(
                 TaskState.TASK_STATE_INPUT_REQUIRED,
-                updater.new_agent_message([Part(text="Wie heißt du?")]),
+                updater.new_agent_message([Part(text="What's your name?")]),
             )
             return
 
+        updater = TaskUpdater(event_queue, task.id, task.context_id)
         answer = context.get_user_input().strip()
-        log.info("TURN 2 -> continue | task_id=%s answer=%r", task.id, answer)
-
-        await updater.update_status(
-            TaskState.TASK_STATE_WORKING,
-            updater.new_agent_message(
-                [Part(text=f"Danke {answer}! Ich mache weiter…")]
-            ),
-        )
-        await asyncio.sleep(1.0)
+        log.info("TURN 2 -> complete | task_id=%s answer=%r", task.id, answer)
 
         await updater.add_artifact(
-            [Part(text=f"Hallo {answer}! ✅ (Multi-Turn abgeschlossen)")],
-            name="greeting.txt",
+            [Part(text=f"Hello {answer}! (Multi-turn completed)")],
+            name="greeting",
         )
-
-        await updater.complete(updater.new_agent_message([Part(text="Fertig ✅")]))
-
-        PHASE_BY_TASK_ID.pop(task.id, None)
+        await updater.complete(
+            updater.new_agent_message([Part(text=f"Thanks {answer}, done.")])
+        )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         return
 
 
 card = AgentCard(
-    name="06 Multi-Turn Demo Agent (REST + SSE)",
-    description="TASK_STATE_INPUT_REQUIRED + continue same task_id via streaming.",
-    version="0.6.1-demo",
+    name="11 Multi-Turn Demo Agent (REST, request/response)",
+    description="TASK_STATE_INPUT_REQUIRED, then continue the same task_id with a second request.",
+    version="1.0.0-demo",
     supported_interfaces=[
         AgentInterface(
             url=f"http://{HOST}:{PORT}",
             protocol_binding=TransportProtocol.HTTP_JSON,
         ),
     ],
-    capabilities=AgentCapabilities(streaming=True, push_notifications=False),
+    capabilities=AgentCapabilities(streaming=False, push_notifications=False),
     default_input_modes=["text/plain"],
     default_output_modes=["text/plain"],
     skills=[],
 )
 
 handler = DefaultRequestHandler(
-    agent_executor=MultiTurnStreamingExecutor(),
+    agent_executor=MultiTurnExecutor(),
     task_store=InMemoryTaskStore(),
     agent_card=card,
 )
