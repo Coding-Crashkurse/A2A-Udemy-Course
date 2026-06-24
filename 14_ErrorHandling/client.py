@@ -45,14 +45,11 @@ async def main() -> None:
         )
 
         try:
-            # 1) Look up a task that doesn't exist -> TaskNotFoundError (404).
             try:
                 await client.get_task(GetTaskRequest(id="does-not-exist"))
             except TaskNotFoundError as e:
                 print(f"TaskNotFoundError: {e.message!r}")
 
-            # 2) Cancel a task that already finished -> TaskNotCancelableError (409).
-            #    QuickExecutor completes the task before send_message returns.
             done = None
             request = SendMessageRequest(
                 message=new_text_message(text="quick job", role=Role.ROLE_USER)
@@ -66,8 +63,6 @@ async def main() -> None:
             except TaskNotCancelableError as e:
                 print(f"TaskNotCancelableError: {e.message!r}")
 
-            # 3) Use a capability the agent doesn't advertise (push_notifications
-            #    =False) -> PushNotificationNotSupportedError (400).
             try:
                 await client.create_task_push_notification_config(
                     TaskPushNotificationConfig(
@@ -77,7 +72,6 @@ async def main() -> None:
             except PushNotificationNotSupportedError as e:
                 print(f"PushNotificationNotSupportedError: {e.message!r}")
 
-            # 4) Catch-all: any protocol error is an A2AError subclass.
             try:
                 await client.get_task(GetTaskRequest(id="another-missing-task"))
             except A2AError as e:

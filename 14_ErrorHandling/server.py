@@ -51,8 +51,6 @@ class QuickExecutor(AgentExecutor):
         await updater.complete(updater.new_agent_message([Part(text="Done")]))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        # The SDK rejects cancels on terminal tasks before reaching here
-        # (TaskNotCancelableError), so this only runs for a still-active task.
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
         await updater.update_status(
             TaskState.TASK_STATE_CANCELED,
