@@ -43,14 +43,18 @@ class MultiTurnExecutor(AgentExecutor):
 
         updater = TaskUpdater(event_queue, task.id, task.context_id)
         answer = context.get_user_input().strip()
-        log.info("TURN 2 -> complete | task_id=%s answer=%r", task.id, answer)
+        log.info("TURN 2 -> working -> complete | task_id=%s answer=%r", task.id, answer)
+
+        await updater.start_work(
+            updater.new_agent_message([Part(text=f"Thanks {answer}, working on it...")])
+        )
 
         await updater.add_artifact(
             [Part(text=f"Hello {answer}! (Multi-turn completed)")],
             name="greeting",
         )
         await updater.complete(
-            updater.new_agent_message([Part(text=f"Thanks {answer}, done.")])
+            updater.new_agent_message([Part(text="Done.")])
         )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
