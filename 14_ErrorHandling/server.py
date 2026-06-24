@@ -1,19 +1,16 @@
-"""Minimal A2A error-handling demo server.
+"""A2A error-handling demo server.
 
-Goal of this chapter: show the *error model*. A2A defines a fixed catalog of
-errors, and each one maps consistently onto every transport (a JSON-RPC code,
-an HTTP status, a gRPC status). This server is deliberately tiny — its only job
-is to let the client provoke a few of those errors at the protocol boundary:
+A2A defines a fixed catalog of protocol errors. Each one maps consistently onto
+every transport (an HTTP status, a JSON-RPC code, a gRPC status) and the
+high-level client re-raises it as a typed `A2AError`. This server just creates
+the conditions the client uses to provoke two representative errors:
 
-  * GET an unknown task            -> TaskNotFoundError      (404 / -32001)
-  * cancel an already-finished task -> TaskNotCancelableError (409 / -32002)
-  * call message:stream here        -> UnsupportedOperationError (400 / -32004)
-    (the agent advertises streaming=False, so the SDK rejects it)
+  * GET an unknown task             -> TaskNotFoundError      (404)
+  * cancel an already-finished task -> TaskNotCancelableError (409)
 
-NOTE (important detail): an exception raised *inside* execute() does NOT become
-a protocol error — the SDK turns it into a FAILED task (HTTP 200). Protocol
-errors come from the handler boundary (get_task / cancel / capability checks),
-which is exactly what we trigger here.
+Note: an exception raised *inside* execute() does NOT become a protocol error —
+the SDK turns it into a FAILED task (HTTP 200). Protocol errors come from the
+handler boundary (get_task / cancel / capability checks).
 """
 
 import logging
@@ -31,82 +28,48 @@ from a2a.types import (
     AgentCapabilities,
     AgentCard,
     AgentInterface,
-    InvalidParamsError,
     Part,
     TaskState,
 )
 from a2a.utils import TransportProtocol
 
-# The error catalog + its transport mappings live in the SDK. We import them so
-# we can print the mapping table — this is the "Spec 5.4" table from the slides.
-from a2a.utils.errors import (
-    A2A_REST_ERROR_MAPPING,
-    JSON_RPC_ERROR_CODE_MAP,
-    TaskNotCancelableError,
-)
-
 HOST = "localhost"
 PORT = 8014
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-log = logging.getLogger("11_ErrorHandling")
-
-TERMINAL_STATES = {
-    TaskState.TASK_STATE_COMPLETED,
-    TaskState.TASK_STATE_FAILED,
-    TaskState.TASK_STATE_REJECTED,
-    TaskState.TASK_STATE_CANCELED,
-}
+log = logging.getLogger("14_ErrorHandling")
 
 
 class QuickExecutor(AgentExecutor):
-    """Creates a task and completes it immediately, so the client has a
-    terminal task to (illegally) try to cancel afterwards."""
-
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         task = context.current_task or new_task_from_user_message(context.message)
         await event_queue.enqueue_event(task)
 
         updater = TaskUpdater(event_queue, task.id, task.context_id)
-        await updater.update_status(
-            TaskState.TASK_STATE_WORKING,
-            updater.new_agent_message([Part(text="Working...")]),
-        )
+        await updater.start_work(updater.new_agent_message([Part(text="Working...")]))
         await updater.add_artifact([Part(text="Result payload")], name="result.txt")
-        await updater.complete(updater.new_agent_message([Part(text="Done ✅")]))
+        await updater.complete(updater.new_agent_message([Part(text="Done")]))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        # Cancellation is best-effort. A task that already reached a terminal
-        # state cannot be canceled -> raise the catalog error that maps to 409.
-        task = context.current_task
-        if task is None:
-            raise InvalidParamsError(message="task not found")
-
-        state = task.status.state if task.status else None
-        if state in TERMINAL_STATES:
-            raise TaskNotCancelableError(
-                message=f"Task cannot be canceled - state={TaskState.Name(state)}"
-            )
-
-        updater = TaskUpdater(event_queue, task.id, task.context_id)
+        # The SDK rejects cancels on terminal tasks before reaching here
+        # (TaskNotCancelableError), so this only runs for a still-active task.
+        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
         await updater.update_status(
             TaskState.TASK_STATE_CANCELED,
-            updater.new_agent_message([Part(text="Canceled ✅")]),
+            updater.new_agent_message([Part(text="Canceled")]),
         )
 
 
 card = AgentCard(
-    name="11 Error Handling Demo Agent (REST)",
+    name="14 Error Handling Demo Agent (REST)",
     description="Tiny agent used to provoke and inspect the A2A error model.",
-    version="0.11.0-demo",
+    version="1.0.0-demo",
     supported_interfaces=[
         AgentInterface(
             url=f"http://{HOST}:{PORT}",
             protocol_binding=TransportProtocol.HTTP_JSON,
         ),
     ],
-    # streaming=False on purpose: calling message:stream becomes an
-    # UnsupportedOperationError (the SDK's @validate guard rejects it).
     capabilities=AgentCapabilities(streaming=False, push_notifications=False),
     default_input_modes=["text/plain"],
     default_output_modes=["text/plain"],
@@ -125,21 +88,5 @@ for route in create_agent_card_routes(agent_card=card):
 for route in create_rest_routes(request_handler=handler):
     app.router.routes.append(route)
 
-
-def _print_error_catalog() -> None:
-    """Log the A2A error catalog: one error -> three transport representations."""
-    log.info("A2A error catalog (error  ->  HTTP / JSON-RPC / gRPC):")
-    for err_cls, rest in A2A_REST_ERROR_MAPPING.items():
-        jsonrpc = JSON_RPC_ERROR_CODE_MAP.get(err_cls, "?")
-        log.info(
-            "  %-34s HTTP %-3d | JSON-RPC %-7s | gRPC %s",
-            err_cls.__name__,
-            rest.http_code,
-            jsonrpc,
-            rest.grpc_status,
-        )
-
-
 if __name__ == "__main__":
-    _print_error_catalog()
     uvicorn.run(app, host=HOST, port=PORT)
