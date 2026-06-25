@@ -110,7 +110,7 @@ class OrchestratorExecutor(AgentExecutor):
                 client_config=ClientConfig(
                     httpx_client=http,
                     supported_protocol_bindings=[TransportProtocol.HTTP_JSON],
-                    streaming=True,
+                    streaming=football_card.capabilities.streaming,
                     polling=False,
                 ),
             )
@@ -120,7 +120,7 @@ class OrchestratorExecutor(AgentExecutor):
                 client_config=ClientConfig(
                     httpx_client=http,
                     supported_protocol_bindings=[TransportProtocol.HTTP_JSON],
-                    streaming=False,
+                    streaming=general_card.capabilities.streaming,
                     polling=False,
                 ),
             )

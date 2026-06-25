@@ -1,269 +1,80 @@
-import os
-from pathlib import Path
-from typing import Any
+import logging
 
-import anyio
-import jwt
-import typer
 import uvicorn
-from dotenv import load_dotenv
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from google.protobuf.json_format import MessageToDict
-from jwt import PyJWKClient
-from jwt.exceptions import PyJWTError
+from fastapi import FastAPI
 
+from a2a.helpers import get_message_text, new_task_from_user_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_agent_card_routes, create_rest_routes
-from a2a.server.tasks import InMemoryTaskStore
+from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
     AgentInterface,
-    AgentSkill,
-    HTTPAuthSecurityScheme,
-    SecurityRequirement,
-    SecurityScheme,
-    StringList,
-    UnsupportedOperationError,
+    Part,
 )
 from a2a.utils import TransportProtocol
 
-load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
-cli = typer.Typer(add_completion=False)
+HOST: str = "0.0.0.0"
+PORT: int = 8001
+BASE_URL: str = f"http://localhost:{PORT}"
 
-AUTH0_DOMAIN = os.environ["AUTH0_DOMAIN"]
-AUTH0_AUDIENCE = os.environ["AUTH0_AUDIENCE"]
+AGENT_VERSION: str = "1.0.0"
 
-ISSUER = f"https://{AUTH0_DOMAIN}/"
-JWKS_URL = f"{ISSUER}.well-known/jwks.json"
-JWT_ALGORITHMS = ["RS256"]
-
-EXTENDED_CARD_PATH = "/v1/extendedAgentCard"
-SUPPORTED_PROTOCOL_VERSION = "1.0"
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 
-def problem(
-    status: int, type_: str, title: str, detail: str, **extra: Any
-) -> JSONResponse:
-    body: dict[str, Any] = {
-        "type": type_,
-        "title": title,
-        "status": status,
-        "detail": detail,
-    }
-    body.update(extra)
-    return JSONResponse(
-        status_code=status, media_type="application/problem+json", content=body
-    )
-
-
-def missing_a2a_version() -> JSONResponse:
-    return problem(
-        400,
-        "https://a2a-protocol.org/errors/version-not-supported",
-        "Protocol Version Not Supported",
-        "Missing required A2A-Version header",
-        header="A2A-Version",
-    )
-
-
-def version_not_supported(requested: str) -> JSONResponse:
-    return problem(
-        400,
-        "https://a2a-protocol.org/errors/version-not-supported",
-        "Protocol Version Not Supported",
-        f"The requested A2A protocol version {requested} is not supported by this agent",
-        supportedVersions=[SUPPORTED_PROTOCOL_VERSION],
-        requestedVersion=requested,
-    )
-
-
-_jwk_client = PyJWKClient(JWKS_URL)
-
-
-def _verify_token(token: str) -> dict[str, Any]:
-    """Verify an Auth0 RS256 token. Blocking (network on cache miss)."""
-    signing_key = _jwk_client.get_signing_key_from_jwt(token)
-    return jwt.decode(
-        token,
-        signing_key.key,
-        algorithms=JWT_ALGORITHMS,
-        audience=AUTH0_AUDIENCE,
-        issuer=ISSUER,
-    )
-
-
-async def verify_bearer_or_raise(authorization: str | None) -> dict[str, Any]:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise PermissionError("Missing Bearer token")
-
-    token = authorization.removeprefix("Bearer ").strip()
-    try:
-        return await anyio.to_thread.run_sync(_verify_token, token)
-    except PyJWTError as e:
-        raise PermissionError("Invalid token") from e
-
-
-def _security_schemes() -> tuple[dict[str, SecurityScheme], list[SecurityRequirement]]:
-    bearer = HTTPAuthSecurityScheme(scheme="Bearer", bearer_format="JWT")
-    schemes: dict[str, SecurityScheme] = {
-        "bearer": SecurityScheme(http_auth_security_scheme=bearer)
-    }
-    security = [SecurityRequirement(schemes={"bearer": StringList(list=[])})]
-    return schemes, security
-
-
-def build_public_agent_card(
-    *, base_url: str, agent_version: str, label: str
-) -> AgentCard:
-    schemes, security = _security_schemes()
-    return AgentCard(
-        name=f"AgentCard Versioning Demo ({label})",
-        description=f"Public card open. Extended card protected. ({label})",
-        version=agent_version,
-        supported_interfaces=[
-            AgentInterface(
-                url=base_url,
-                protocol_binding=TransportProtocol.HTTP_JSON,
-            ),
-        ],
-        capabilities=AgentCapabilities(
-            streaming=False, push_notifications=False, extended_agent_card=True
-        ),
-        default_input_modes=["text/plain"],
-        default_output_modes=["text/plain"],
-        skills=[
-            AgentSkill(
-                id="public.card.info",
-                name="Public Card Info",
-                description="Public-facing metadata (no auth).",
-                tags=["public", "agent-card", "demo"],
-            )
-        ],
-        security_schemes=schemes,
-        security_requirements=security,
-    )
-
-
-def build_private_agent_card(
-    *, base_url: str, agent_version: str, label: str
-) -> AgentCard:
-    schemes, security = _security_schemes()
-    return AgentCard(
-        name=f"AgentCard Versioning Demo (Extended, {label})",
-        description=f"Extended agent card. Requires Bearer JWT. ({label})",
-        version=agent_version,
-        supported_interfaces=[
-            AgentInterface(
-                url=base_url,
-                protocol_binding=TransportProtocol.HTTP_JSON,
-            ),
-        ],
-        capabilities=AgentCapabilities(
-            streaming=False, push_notifications=False, extended_agent_card=True
-        ),
-        default_input_modes=["text/plain"],
-        default_output_modes=["text/plain"],
-        skills=[
-            AgentSkill(
-                id="public.card.info",
-                name="Public Card Info",
-                description="Still present here.",
-                tags=["public", "agent-card", "demo"],
-            ),
-            AgentSkill(
-                id="private.card.secrets",
-                name="Private Card Secrets",
-                description="Only visible on extended card.",
-                tags=["private", "extended-card", "auth"],
-            ),
-        ],
-        security_schemes=schemes,
-        security_requirements=security,
-    )
-
-
-class CardOnlyExecutor(AgentExecutor):
+class EchoExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        raise UnsupportedOperationError(message="This demo only serves agent cards")
+        task = context.current_task or new_task_from_user_message(context.message)
+        await event_queue.enqueue_event(task)
+
+        updater = TaskUpdater(event_queue, task.id, task.context_id)
+        await updater.start_work(updater.new_agent_message([Part(text="Working...")]))
+        await updater.add_artifact(
+            [Part(text=f"Echo: {get_message_text(context.message)}")], name="echo.txt"
+        )
+        await updater.complete(updater.new_agent_message([Part(text="Done")]))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         return
 
 
-def build_app(*, port: int, agent_version: str, label: str) -> FastAPI:
-    base_url = f"http://localhost:{port}"
-
-    public_card = build_public_agent_card(
-        base_url=base_url, agent_version=agent_version, label=label
+def build_agent_card() -> AgentCard:
+    return AgentCard(
+        name="Versioning Demo (Echo)",
+        description="Echo agent for the A2A versioning demo.",
+        version=AGENT_VERSION,
+        supported_interfaces=[
+            AgentInterface(url=BASE_URL, protocol_binding=TransportProtocol.HTTP_JSON),
+        ],
+        capabilities=AgentCapabilities(streaming=False, push_notifications=False),
+        default_input_modes=["text/plain"],
+        default_output_modes=["text/plain"],
+        skills=[],
     )
-    private_card = build_private_agent_card(
-        base_url=base_url, agent_version=agent_version, label=label
-    )
 
+
+def build_app() -> FastAPI:
+    card = build_agent_card()
     handler = DefaultRequestHandler(
-        agent_executor=CardOnlyExecutor(),
+        agent_executor=EchoExecutor(),
         task_store=InMemoryTaskStore(),
-        agent_card=public_card,
+        agent_card=card,
     )
 
     app = FastAPI()
-
-    @app.get(EXTENDED_CARD_PATH)
-    async def get_extended_agent_card() -> JSONResponse:
-        return JSONResponse(
-            MessageToDict(private_card, preserving_proto_field_name=True)
-        )
-
-    for route in create_agent_card_routes(agent_card=public_card):
+    for route in create_agent_card_routes(agent_card=card):
         app.router.routes.append(route)
     for route in create_rest_routes(request_handler=handler):
         app.router.routes.append(route)
 
-    @app.middleware("http")
-    async def gate(request: Request, call_next):
-        path = request.url.path
-
-        if not path.startswith("/v1/"):
-            return await call_next(request)
-
-        requested = request.headers.get("A2A-Version")
-        if requested is None:
-            return missing_a2a_version()
-
-        if requested != SUPPORTED_PROTOCOL_VERSION:
-            return version_not_supported(requested)
-
-        if path == EXTENDED_CARD_PATH:
-            try:
-                await verify_bearer_or_raise(request.headers.get("authorization"))
-            except PermissionError as e:
-                return JSONResponse({"detail": str(e)}, status_code=401)
-
-        return await call_next(request)
-
     return app
 
 
-@cli.callback(invoke_without_command=True)
-def main(
-    host: str = typer.Option("127.0.0.1"),
-    port: int = typer.Option(8001),
-    agent_version: str = typer.Option(
-        "0.1.0",
-        help="AgentCard.version MUST be semver x.y.z (client compares it).",
-    ),
-    label: str = typer.Option(
-        "demo",
-        help="Free label shown in name/description (not used for version checks).",
-    ),
-) -> None:
-    app = build_app(port=port, agent_version=agent_version, label=label)
-    uvicorn.run(app, host=host, port=port)
-
+app = build_app()
 
 if __name__ == "__main__":
-    cli()
+    uvicorn.run(app, host=HOST, port=PORT)
