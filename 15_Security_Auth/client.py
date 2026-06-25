@@ -29,7 +29,6 @@ AUTH0_AUDIENCE: str = os.environ["AUTH0_AUDIENCE"]
 A2A_BASE_URL: str = os.environ.get("A2A_BASE_URL", "http://localhost:8001")
 
 TOKEN_URL: str = f"https://{AUTH0_DOMAIN}/oauth/token"
-AGENT_CARD_URL: str = f"{A2A_BASE_URL}/.well-known/agent-card.json"
 
 
 async def fetch_token(http: httpx.AsyncClient) -> str:
@@ -64,7 +63,13 @@ def build_config(http: httpx.AsyncClient) -> ClientConfig:
     )
 
 
-async def demo_fail_without_token(http: httpx.AsyncClient, text: str) -> None:
+async def demo(http: httpx.AsyncClient, text: str, *, with_token: bool = False) -> None:
+    label = "WITH TOKEN" if with_token else "WITHOUT TOKEN"
+
+    if with_token:
+        token = await fetch_token(http)
+        http.headers["Authorization"] = f"Bearer {token}"
+
     card: AgentCard = await A2ACardResolver(http, A2A_BASE_URL).get_agent_card()
     client = await create_client(card, client_config=build_config(http))
 
@@ -73,31 +78,13 @@ async def demo_fail_without_token(http: httpx.AsyncClient, text: str) -> None:
     )
 
     try:
-        async for _ in client.send_message(request):
-            pass
-        print("WITHOUT TOKEN -> unexpected success (expected 401)")
-    except A2AClientError as exc:
-        print(f"WITHOUT TOKEN -> {exc}")
-
-
-async def demo_success_with_token(http: httpx.AsyncClient, text: str) -> None:
-    token = await fetch_token(http)
-    http.headers["Authorization"] = f"Bearer {token}"
-
-    card: AgentCard = await A2ACardResolver(http, A2A_BASE_URL).get_agent_card()
-    client = await create_client(card, client_config=build_config(http))
-
-    try:
-        request = SendMessageRequest(
-            message=new_text_message(text=text, role=Role.ROLE_USER)
-        )
-
         async for reply in client.send_message(request):
             if reply.HasField("message"):
-                print(f"reply: {get_message_text(reply.message)}")
-
-    finally:
-        await client.close()
+                print(f"{label} -> reply: {get_message_text(reply.message)}")
+        if not with_token:
+            print(f"{label} -> unexpected success (expected 401)")
+    except A2AClientError as exc:
+        print(f"{label} -> {exc}")
 
 
 @app.callback(invoke_without_command=True)
@@ -106,12 +93,9 @@ def main(
 ) -> None:
     async def _run() -> None:
         async with httpx.AsyncClient(timeout=None) as http:
-            r = await http.get(AGENT_CARD_URL)
-            r.raise_for_status()
-
-            await demo_fail_without_token(http, text)
+            await demo(http, text)
             print("\n--- NOW WITH TOKEN ---\n")
-            await demo_success_with_token(http, text)
+            await demo(http, text, with_token=True)
 
     asyncio.run(_run())
 
