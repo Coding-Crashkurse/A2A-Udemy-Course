@@ -8,14 +8,13 @@ import httpx
 import typer
 from dotenv import load_dotenv
 
-from a2a.client import ClientConfig, create_client
+from a2a.client import A2AClientError, ClientConfig, create_client
 from a2a.client.card_resolver import A2ACardResolver
-from a2a.helpers import get_artifact_text, get_message_text, new_text_message
+from a2a.helpers import get_message_text, new_text_message
 from a2a.types import (
     AgentCard,
     Role,
     SendMessageRequest,
-    TaskState,
 )
 from a2a.utils import TransportProtocol
 
@@ -31,7 +30,6 @@ A2A_BASE_URL: str = os.environ.get("A2A_BASE_URL", "http://localhost:8001")
 
 TOKEN_URL: str = f"https://{AUTH0_DOMAIN}/oauth/token"
 AGENT_CARD_URL: str = f"{A2A_BASE_URL}/.well-known/agent-card.json"
-STREAM_URL: str = f"{A2A_BASE_URL}/message:stream"
 
 
 async def fetch_token(http: httpx.AsyncClient) -> str:
@@ -61,22 +59,30 @@ def build_config(http: httpx.AsyncClient) -> ClientConfig:
     return ClientConfig(
         supported_protocol_bindings=[TransportProtocol.HTTP_JSON],
         httpx_client=http,
-        streaming=True,
+        streaming=False,
         polling=False,
     )
 
 
 async def demo_fail_without_token(http: httpx.AsyncClient, text: str) -> None:
-    body = {
-        "message": {
-            "role": "ROLE_USER",
-            "message_id": "demo-msg",
-            "parts": [{"text": text}],
-        }
-    }
-    r = await http.post(STREAM_URL, json=body, headers={"A2A-Version": "1.0"})
-    print(f"WITHOUT TOKEN -> http={r.status_code}")
-    print(r.text[:300])
+    # Same SDK client path as the success case, only without an Authorization
+    # header. The agent card endpoint is public, so resolving it needs no token;
+    # the protected message:stream call then fails with 401.
+    card: AgentCard = await A2ACardResolver(http, A2A_BASE_URL).get_agent_card()
+    client = await create_client(card, client_config=build_config(http))
+
+    request = SendMessageRequest(
+        message=new_text_message(text=text, role=Role.ROLE_USER)
+    )
+
+    try:
+        async for _ in client.send_message(request):
+            pass
+        print("WITHOUT TOKEN -> unexpected success (expected 401)")
+    except A2AClientError as exc:
+        print(f"WITHOUT TOKEN -> {exc}")
+    # Don't close(): that would aclose the shared httpx client which the
+    # success demo (run next) still needs.
 
 
 async def demo_success_with_token(http: httpx.AsyncClient, text: str) -> None:
@@ -92,21 +98,8 @@ async def demo_success_with_token(http: httpx.AsyncClient, text: str) -> None:
         )
 
         async for reply in client.send_message(request):
-            if reply.HasField("task"):
-                t = reply.task
-                print(f"state={TaskState.Name(t.status.state)}")
-            elif reply.HasField("status_update"):
-                su = reply.status_update
-                line = f"state={TaskState.Name(su.status.state)}"
-                if su.status.HasField("message"):
-                    line += f" text={get_message_text(su.status.message)}"
-                print(line)
-            elif reply.HasField("artifact_update"):
-                au = reply.artifact_update
-                print(
-                    f"artifact={au.artifact.name}"
-                    f" artifactText={get_artifact_text(au.artifact)}"
-                )
+            if reply.HasField("message"):
+                print(f"reply: {get_message_text(reply.message)}")
 
     finally:
         await client.close()

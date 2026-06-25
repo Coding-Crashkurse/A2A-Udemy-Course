@@ -1,14 +1,15 @@
 import os
 from pathlib import Path
 
-import httpx
+import anyio
+import jwt
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from google.protobuf.json_format import MessageToDict
-from jose import jwt
-from jose.exceptions import JWTError
+from jwt import PyJWKClient
+from jwt.exceptions import PyJWTError
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -41,33 +42,29 @@ JWT_ALGORITHMS = ["RS256"]
 EXTENDED_CARD_PATH = "/v1/extendedAgentCard"
 
 
-async def fetch_jwks() -> dict:
-    async with httpx.AsyncClient(timeout=10.0) as http:
-        r = await http.get(JWKS_URL)
-        r.raise_for_status()
-        return r.json()
+_jwk_client = PyJWKClient(JWKS_URL)
+
+
+def _verify_token(token: str) -> dict:
+    """Verify an Auth0 RS256 token. Blocking (network on cache miss)."""
+    signing_key = _jwk_client.get_signing_key_from_jwt(token)
+    return jwt.decode(
+        token,
+        signing_key.key,
+        algorithms=JWT_ALGORITHMS,
+        audience=AUTH0_AUDIENCE,
+        issuer=ISSUER,
+    )
 
 
 async def verify_bearer_or_raise(authorization: str | None):
     if not authorization or not authorization.startswith("Bearer "):
         raise PermissionError("Missing Bearer token")
 
-    token = authorization.removeprefix("Bearer ")
-
+    token = authorization.removeprefix("Bearer ").strip()
     try:
-        jwks = await fetch_jwks()
-
-        signing_key_id = jwt.get_unverified_header(token)["kid"]
-        jwk_key = next(k for k in jwks["keys"] if k["kid"] == signing_key_id)
-
-        return jwt.decode(
-            token,
-            jwk_key,
-            algorithms=JWT_ALGORITHMS,
-            audience=AUTH0_AUDIENCE,
-            issuer=ISSUER,
-        )
-    except (JWTError, KeyError, StopIteration) as e:
+        return await anyio.to_thread.run_sync(_verify_token, token)
+    except PyJWTError as e:
         raise PermissionError("Invalid token") from e
 
 

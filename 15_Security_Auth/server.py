@@ -1,37 +1,44 @@
-import asyncio
+import logging
 import os
 from pathlib import Path
-import time
-from typing import Any, cast
+from typing import Any
 
-import httpx
+import anyio
+import jwt
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from jose import jwt
-from jose.exceptions import JWTError
+from jwt import PyJWKClient
+from jwt.exceptions import PyJWTError
+from starlette.authentication import (
+    AuthCredentials,
+    AuthenticationBackend,
+    AuthenticationError,
+    BaseUser,
+    SimpleUser,
+)
+from starlette.middleware.authentication import AuthenticationMiddleware
+from starlette.requests import HTTPConnection
 
-from a2a.helpers import new_task_from_user_message
+from a2a.helpers import get_message_text, new_text_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_agent_card_routes, create_rest_routes
-from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
+from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
     AgentInterface,
-    AgentSkill,
     HTTPAuthSecurityScheme,
     OpenIdConnectSecurityScheme,
-    Part,
     SecurityRequirement,
     SecurityScheme,
     StringList,
-    TaskState,
 )
 from a2a.utils import TransportProtocol
+from a2a.utils.constants import AGENT_CARD_WELL_KNOWN_PATH
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
@@ -46,96 +53,68 @@ ISSUER: str = f"https://{AUTH0_DOMAIN}/"
 JWKS_URL: str = f"{ISSUER}.well-known/jwks.json"
 ALGORITHMS: list[str] = ["RS256"]
 
-_JWKS_CACHE: dict[str, Any] | None = None
-_JWKS_CACHE_TS: float = 0.0
-_JWKS_TTL_S: float = 3600.0
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+log = logging.getLogger("15_Security_Auth")
+
+PUBLIC_PATHS = {AGENT_CARD_WELL_KNOWN_PATH}
 
 
-async def _get_jwks() -> dict[str, Any]:
-    global _JWKS_CACHE, _JWKS_CACHE_TS
-    now = time.time()
-    if _JWKS_CACHE is not None and (now - _JWKS_CACHE_TS) < _JWKS_TTL_S:
-        return _JWKS_CACHE
-
-    async with httpx.AsyncClient(timeout=10.0) as http:
-        r = await http.get(JWKS_URL)
-        r.raise_for_status()
-        _JWKS_CACHE = cast(dict[str, Any], r.json())
-        _JWKS_CACHE_TS = now
-        return _JWKS_CACHE
+_jwk_client = PyJWKClient(JWKS_URL)
 
 
-async def require_auth(
-    authorization: str | None = Header(default=None),
-) -> dict[str, Any]:
-    if authorization is None or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing Bearer token")
-
-    token: str = authorization.removeprefix("Bearer ").strip()
-    jwks: dict[str, Any] = await _get_jwks()
-
-    try:
-        header: dict[str, Any] = cast(dict[str, Any], jwt.get_unverified_header(token))
-        kid: str | None = cast(str | None, header.get("kid"))
-        if kid is None:
-            raise HTTPException(status_code=401, detail="Token missing kid")
-
-        keys_any: Any = jwks.get("keys", [])
-        keys: list[dict[str, Any]] = cast(list[dict[str, Any]], keys_any)
-
-        key: dict[str, Any] | None = next(
-            (k for k in keys if k.get("kid") == kid), None
-        )
-        if key is None:
-            raise HTTPException(status_code=401, detail="Unknown signing key (kid)")
-
-        payload: dict[str, Any] = cast(
-            dict[str, Any],
-            jwt.decode(
-                token,
-                key,
-                algorithms=ALGORITHMS,
-                audience=AUTH0_AUDIENCE,
-                issuer=ISSUER,
-            ),
-        )
-        return payload
-
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+def _verify_token(token: str) -> dict[str, Any]:
+    """Verify an Auth0 RS256 token. Blocking (network on cache miss)."""
+    signing_key = _jwk_client.get_signing_key_from_jwt(token)
+    return jwt.decode(
+        token,
+        signing_key.key,
+        algorithms=ALGORITHMS,
+        audience=AUTH0_AUDIENCE,
+        issuer=ISSUER,
+    )
 
 
-class StreamingDemoExecutor(AgentExecutor):
+class Auth0Backend(AuthenticationBackend):
+    """Verifies the Auth0 bearer token for AuthenticationMiddleware."""
+
+    async def authenticate(
+        self, conn: HTTPConnection
+    ) -> tuple[AuthCredentials, BaseUser] | None:
+        if conn.url.path in PUBLIC_PATHS:
+            return None
+
+        header = conn.headers.get("authorization")
+        if header is None or not header.startswith("Bearer "):
+            raise AuthenticationError("Missing Bearer token")
+
+        token = header.removeprefix("Bearer ").strip()
+        try:
+            claims = await anyio.to_thread.run_sync(_verify_token, token)
+        except PyJWTError as exc:
+            raise AuthenticationError("Invalid token") from exc
+
+        scopes = str(claims.get("scope", "")).split()
+        return AuthCredentials(scopes), SimpleUser(str(claims.get("sub", "")))
+
+
+def on_auth_error(conn: HTTPConnection, exc: AuthenticationError) -> JSONResponse:
+    return JSONResponse({"detail": str(exc)}, status_code=401)
+
+
+class EchoExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        task = context.current_task or new_task_from_user_message(context.message)
-
-        await event_queue.enqueue_event(task)
-        updater = TaskUpdater(event_queue, task.id, task.context_id)
-
-        await updater.update_status(
-            TaskState.TASK_STATE_WORKING,
-            updater.new_agent_message([Part(text="Working 1/3...")]),
-        )
-        await asyncio.sleep(1.0)
-
-        await updater.update_status(
-            TaskState.TASK_STATE_WORKING,
-            updater.new_agent_message([Part(text="Working 2/3...")]),
-        )
-        await asyncio.sleep(1.0)
-
-        await updater.update_status(
-            TaskState.TASK_STATE_WORKING,
-            updater.new_agent_message([Part(text="Working 3/3...")]),
-        )
-        await asyncio.sleep(1.0)
-
-        await updater.add_artifact(
-            [Part(text="Demo artifact text ✅")],
-            name="result.txt",
+        user = context.call_context.user
+        log.info(
+            "Authenticated caller: user_name=%s is_authenticated=%s",
+            user.user_name,
+            user.is_authenticated,
         )
 
-        await updater.complete()
+        reply = new_text_message(
+            f"Authenticated as {user.user_name}. "
+            f"You said: {get_message_text(context.message)}"
+        )
+        await event_queue.enqueue_event(reply)
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         return
@@ -156,21 +135,9 @@ def build_agent_card() -> AgentCard:
         SecurityRequirement(schemes={"bearer": StringList(list=[])})
     ]
 
-    skills: list[AgentSkill] = [
-        AgentSkill(
-            id="demo.streaming.echo",
-            name="Streaming Echo Demo",
-            description="Streams 3 progress updates and returns one artifact.",
-            tags=["demo", "streaming", "sse"],
-            examples=["Hello from streaming demo!"],
-            input_modes=["text/plain"],
-            output_modes=["text/plain"],
-        )
-    ]
-
     return AgentCard(
-        name="Streaming Demo Agent (REST + SSE, Auth0 protected)",
-        description="SSE streaming demo protected via Auth0 (RS256 JWT).",
+        name="Echo Agent (REST, Auth0 protected)",
+        description="Request/response echo protected via Auth0 (RS256 JWT).",
         version="0.1.0-demo",
         supported_interfaces=[
             AgentInterface(
@@ -178,47 +145,36 @@ def build_agent_card() -> AgentCard:
                 protocol_binding=TransportProtocol.HTTP_JSON,
             ),
         ],
-        capabilities=AgentCapabilities(streaming=True, push_notifications=False),
+        capabilities=AgentCapabilities(streaming=False, push_notifications=False),
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
-        skills=skills,
+        skills=[],
         security_schemes=security_schemes,
         security_requirements=security_requirements,
     )
 
 
-PUBLIC_PATHS = {"/.well-known/agent-card.json"}
-
-
 def build_app() -> FastAPI:
     card = build_agent_card()
     handler = DefaultRequestHandler(
-        agent_executor=StreamingDemoExecutor(),
+        agent_executor=EchoExecutor(),
         task_store=InMemoryTaskStore(),
         agent_card=card,
     )
 
     app = FastAPI()
 
-    # AgentCard route (public, no auth)
     for route in create_agent_card_routes(agent_card=card):
         app.router.routes.append(route)
 
-    # A2A REST routes — auth is enforced by the middleware below, since
-    # FastAPI's Depends() does NOT wrap manually-appended Starlette
-    # Route/Mount objects (those are what create_rest_routes returns).
     for route in create_rest_routes(request_handler=handler):
         app.router.routes.append(route)
 
-    @app.middleware("http")
-    async def gate_auth(request: Request, call_next):
-        if request.url.path in PUBLIC_PATHS:
-            return await call_next(request)
-        try:
-            await require_auth(request.headers.get("authorization"))
-        except HTTPException as e:
-            return JSONResponse({"detail": e.detail}, status_code=e.status_code)
-        return await call_next(request)
+    app.add_middleware(
+        AuthenticationMiddleware,
+        backend=Auth0Backend(),
+        on_error=on_auth_error,
+    )
 
     return app
 
