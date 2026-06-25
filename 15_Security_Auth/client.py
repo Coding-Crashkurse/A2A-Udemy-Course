@@ -65,9 +65,6 @@ def build_config(http: httpx.AsyncClient) -> ClientConfig:
 
 
 async def demo_fail_without_token(http: httpx.AsyncClient, text: str) -> None:
-    # Same SDK client path as the success case, only without an Authorization
-    # header. The agent card endpoint is public, so resolving it needs no token;
-    # the protected message:stream call then fails with 401.
     card: AgentCard = await A2ACardResolver(http, A2A_BASE_URL).get_agent_card()
     client = await create_client(card, client_config=build_config(http))
 
@@ -81,8 +78,6 @@ async def demo_fail_without_token(http: httpx.AsyncClient, text: str) -> None:
         print("WITHOUT TOKEN -> unexpected success (expected 401)")
     except A2AClientError as exc:
         print(f"WITHOUT TOKEN -> {exc}")
-    # Don't close(): that would aclose the shared httpx client which the
-    # success demo (run next) still needs.
 
 
 async def demo_success_with_token(http: httpx.AsyncClient, text: str) -> None:

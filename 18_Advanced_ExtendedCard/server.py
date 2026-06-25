@@ -165,9 +165,6 @@ handler = DefaultRequestHandler(
 app = FastAPI()
 
 
-# Custom routes must be registered BEFORE create_rest_routes, since the SDK
-# adds a catch-all Mount(path="/{tenant}") that would otherwise intercept any
-# unmatched /v1/... path and return 400 / 404.
 @app.get(EXTENDED_CARD_PATH)
 async def get_extended_agent_card() -> JSONResponse:
     return JSONResponse(MessageToDict(private_card, preserving_proto_field_name=True))

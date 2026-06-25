@@ -212,9 +212,6 @@ def build_app(*, port: int, agent_version: str, label: str) -> FastAPI:
 
     app = FastAPI()
 
-    # Custom extended-card route MUST be registered before the SDK rest routes,
-    # since create_rest_routes adds a catch-all Mount(path="/{tenant}") that
-    # would otherwise intercept /v1/extendedAgentCard.
     @app.get(EXTENDED_CARD_PATH)
     async def get_extended_agent_card() -> JSONResponse:
         return JSONResponse(
