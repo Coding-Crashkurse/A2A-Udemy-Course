@@ -71,6 +71,7 @@ def _verify_token(token: str) -> dict[str, Any]:
         algorithms=ALGORITHMS,
         audience=AUTH0_AUDIENCE,
         issuer=ISSUER,
+        leeway=60,
     )
 
 
