@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, cast
 
 import httpx
-import typer
 from dotenv import load_dotenv
 
 from a2a.client import A2AClientError, ClientConfig, create_client
@@ -20,7 +19,7 @@ from a2a.utils import TransportProtocol
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
-app = typer.Typer(add_completion=False)
+DEMO_TEXT: str = "Hello from streaming demo!"
 
 AUTH0_DOMAIN: str = os.environ["AUTH0_DOMAIN"]
 AUTH0_CLIENT_ID: str = os.environ["AUTH0_CLIENT_ID"]
@@ -87,18 +86,15 @@ async def demo(http: httpx.AsyncClient, text: str, *, with_token: bool = False) 
         print(f"{label} -> {exc}")
 
 
-@app.callback(invoke_without_command=True)
-def main(
-    text: str = typer.Option("Hello from streaming demo!", help="Text to send"),
-) -> None:
+def main() -> None:
     async def _run() -> None:
         async with httpx.AsyncClient(timeout=None) as http:
-            await demo(http, text)
+            await demo(http, DEMO_TEXT)
             print("\n--- NOW WITH TOKEN ---\n")
-            await demo(http, text, with_token=True)
+            await demo(http, DEMO_TEXT, with_token=True)
 
     asyncio.run(_run())
 
 
 if __name__ == "__main__":
-    app()
+    main()
