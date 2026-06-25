@@ -21,7 +21,7 @@ HOST: str = "0.0.0.0"
 PORT: int = 8001
 BASE_URL: str = f"http://localhost:{PORT}"
 
-AGENT_VERSION: str = "1.0.0"
+AGENT_VERSION: str = "0.1.3"
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -48,7 +48,11 @@ def build_agent_card() -> AgentCard:
         description="Echo agent for the A2A versioning demo.",
         version=AGENT_VERSION,
         supported_interfaces=[
-            AgentInterface(url=BASE_URL, protocol_binding=TransportProtocol.HTTP_JSON),
+            AgentInterface(
+                url=BASE_URL,
+                protocol_binding=TransportProtocol.HTTP_JSON,
+                protocol_version="1.0",
+            ),
         ],
         capabilities=AgentCapabilities(streaming=False, push_notifications=False),
         default_input_modes=["text/plain"],
