@@ -68,11 +68,10 @@ async def main() -> None:
         print(_dump(public_card))
 
         client = await create_client(public_card, client_config=build_config(http))
-        request = GetExtendedAgentCardRequest()
 
         print("\n=== 2) EXTENDED AGENT CARD (WITHOUT TOKEN) ===")
         try:
-            await client.get_extended_agent_card(request)
+            await client.get_extended_agent_card(GetExtendedAgentCardRequest())
             print("Unexpected success (expected 401)")
         except A2AClientError as exc:
             print(f"Rejected as expected -> {exc}")
@@ -83,7 +82,7 @@ async def main() -> None:
         print("Token received. (not printing token)")
 
         print("\n=== 4) EXTENDED AGENT CARD (WITH TOKEN) ===")
-        extended_card = await client.get_extended_agent_card(request)
+        extended_card = await client.get_extended_agent_card(GetExtendedAgentCardRequest())
         print(_dump(extended_card))
 
 
