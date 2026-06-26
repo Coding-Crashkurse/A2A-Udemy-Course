@@ -41,25 +41,21 @@ class ChatContext(BaseModel):
     chat_id: UUID
 
 
-def _require_chat_context(ctx: RequestContext) -> ChatContext:
-    msg = cast(Message, ctx.message)
-    metadata = MessageToDict(msg.metadata) if msg.metadata else {}
-
-    payload = metadata.get(CHAT_EXTENSION_URI)
-    if payload is None:
-        raise InvalidParamsError(
-            message=f"Missing required extension metadata '{CHAT_EXTENSION_URI}'"
-        )
-
-    try:
-        return ChatContext.model_validate(payload)
-    except ValidationError as exc:
-        raise InvalidParamsError(message=f"Invalid chat-context: {exc}") from exc
-
-
 class ChatContextExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        chat = _require_chat_context(context)
+        msg = cast(Message, context.message)
+        metadata = MessageToDict(msg.metadata) if msg.metadata else {}
+
+        payload = metadata.get(CHAT_EXTENSION_URI)
+        if payload is None:
+            raise InvalidParamsError(
+                message=f"Missing required extension metadata '{CHAT_EXTENSION_URI}'"
+            )
+
+        try:
+            chat = ChatContext.model_validate(payload)
+        except ValidationError as exc:
+            raise InvalidParamsError(message=f"Invalid chat-context: {exc}") from exc
 
         user_text = context.get_user_input()
 
