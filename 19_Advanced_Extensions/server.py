@@ -1,10 +1,8 @@
 import logging
-from pathlib import Path
 from typing import cast
 from uuid import UUID
 
 import uvicorn
-from dotenv import load_dotenv
 from fastapi import FastAPI
 from google.protobuf.json_format import MessageToDict
 from pydantic import BaseModel, ValidationError
