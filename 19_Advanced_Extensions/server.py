@@ -95,19 +95,7 @@ agent_card = AgentCard(
     ),
     default_input_modes=["text/plain"],
     default_output_modes=["text/plain"],
-    skills=[
-        AgentSkill(
-            id="demo.chat.context",
-            name="Chat Context via Extension",
-            description="Requires chat_id in metadata; echoes the message back.",
-            tags=["demo", "extension", "chat-context"],
-            examples=[
-                '{"metadata": {"https://example.com/extensions/chat-context/v1": {"chat_id": "c-123"}}}',
-            ],
-            input_modes=["text/plain"],
-            output_modes=["text/plain"],
-        )
-    ],
+    skills=[],
 )
 
 handler = DefaultRequestHandler(
