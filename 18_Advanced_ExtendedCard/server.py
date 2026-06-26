@@ -1,15 +1,25 @@
+import logging
 import os
 from pathlib import Path
+from typing import Any
 
 import anyio
 import jwt
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from google.protobuf.json_format import MessageToDict
 from jwt import PyJWKClient
 from jwt.exceptions import PyJWTError
+from starlette.authentication import (
+    AuthCredentials,
+    AuthenticationBackend,
+    AuthenticationError,
+    BaseUser,
+    SimpleUser,
+)
+from starlette.middleware.authentication import AuthenticationMiddleware
+from starlette.requests import HTTPConnection
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -28,44 +38,68 @@ from a2a.types import (
     UnsupportedOperationError,
 )
 from a2a.utils import TransportProtocol
+from a2a.utils.constants import AGENT_CARD_WELL_KNOWN_PATH
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
-BASE_URL = "http://localhost:8001"
-AUTH0_DOMAIN = os.environ["AUTH0_DOMAIN"]
-AUTH0_AUDIENCE = os.environ["AUTH0_AUDIENCE"]
+HOST: str = "0.0.0.0"
+PORT: int = 8001
+BASE_URL: str = f"http://localhost:{PORT}"
 
-ISSUER = f"https://{AUTH0_DOMAIN}/"
-JWKS_URL = f"{ISSUER}.well-known/jwks.json"
-JWT_ALGORITHMS = ["RS256"]
+AUTH0_DOMAIN: str = os.environ["AUTH0_DOMAIN"]
+AUTH0_AUDIENCE: str = os.environ["AUTH0_AUDIENCE"]
 
-EXTENDED_CARD_PATH = "/v1/extendedAgentCard"
+ISSUER: str = f"https://{AUTH0_DOMAIN}/"
+JWKS_URL: str = f"{ISSUER}.well-known/jwks.json"
+ALGORITHMS: list[str] = ["RS256"]
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+log = logging.getLogger("18_Advanced_ExtendedCard")
+
+PUBLIC_PATHS = {AGENT_CARD_WELL_KNOWN_PATH}
 
 
 _jwk_client = PyJWKClient(JWKS_URL)
 
 
-def _verify_token(token: str) -> dict:
+def _verify_token(token: str) -> dict[str, Any]:
     """Verify an Auth0 RS256 token. Blocking (network on cache miss)."""
     signing_key = _jwk_client.get_signing_key_from_jwt(token)
     return jwt.decode(
         token,
         signing_key.key,
-        algorithms=JWT_ALGORITHMS,
+        algorithms=ALGORITHMS,
         audience=AUTH0_AUDIENCE,
         issuer=ISSUER,
+        leeway=60,
     )
 
 
-async def verify_bearer_or_raise(authorization: str | None):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise PermissionError("Missing Bearer token")
+class Auth0Backend(AuthenticationBackend):
+    """Verifies the Auth0 bearer token for AuthenticationMiddleware."""
 
-    token = authorization.removeprefix("Bearer ").strip()
-    try:
-        return await anyio.to_thread.run_sync(_verify_token, token)
-    except PyJWTError as e:
-        raise PermissionError("Invalid token") from e
+    async def authenticate(
+        self, conn: HTTPConnection
+    ) -> tuple[AuthCredentials, BaseUser] | None:
+        if conn.url.path in PUBLIC_PATHS:
+            return None
+
+        header = conn.headers.get("authorization")
+        if header is None or not header.startswith("Bearer "):
+            raise AuthenticationError("Missing Bearer token")
+
+        token = header.removeprefix("Bearer ").strip()
+        try:
+            claims = await anyio.to_thread.run_sync(_verify_token, token)
+        except PyJWTError as exc:
+            raise AuthenticationError("Invalid token") from exc
+
+        scopes = str(claims.get("scope", "")).split()
+        return AuthCredentials(scopes), SimpleUser(str(claims.get("sub", "")))
+
+
+def on_auth_error(conn: HTTPConnection, exc: AuthenticationError) -> JSONResponse:
+    return JSONResponse({"detail": str(exc)}, status_code=401)
 
 
 def _security_schemes() -> tuple[dict[str, SecurityScheme], list[SecurityRequirement]]:
@@ -108,7 +142,7 @@ def build_public_agent_card() -> AgentCard:
     )
 
 
-def build_private_agent_card() -> AgentCard:
+def build_extended_agent_card() -> AgentCard:
     schemes, security = _security_schemes()
 
     return AgentCard(
@@ -153,39 +187,35 @@ class CardOnlyExecutor(AgentExecutor):
         return
 
 
-public_card = build_public_agent_card()
-private_card = build_private_agent_card()
+def build_app() -> FastAPI:
+    public_card = build_public_agent_card()
+    extended_card = build_extended_agent_card()
 
-handler = DefaultRequestHandler(
-    agent_executor=CardOnlyExecutor(),
-    task_store=InMemoryTaskStore(),
-    agent_card=public_card,
-)
+    handler = DefaultRequestHandler(
+        agent_executor=CardOnlyExecutor(),
+        task_store=InMemoryTaskStore(),
+        agent_card=public_card,
+        extended_agent_card=extended_card,
+    )
 
-app = FastAPI()
+    app = FastAPI()
+
+    for route in create_agent_card_routes(agent_card=public_card):
+        app.router.routes.append(route)
+
+    for route in create_rest_routes(request_handler=handler):
+        app.router.routes.append(route)
+
+    app.add_middleware(
+        AuthenticationMiddleware,
+        backend=Auth0Backend(),
+        on_error=on_auth_error,
+    )
+
+    return app
 
 
-@app.get(EXTENDED_CARD_PATH)
-async def get_extended_agent_card() -> JSONResponse:
-    return JSONResponse(MessageToDict(private_card, preserving_proto_field_name=True))
-
-
-for route in create_agent_card_routes(agent_card=public_card):
-    app.router.routes.append(route)
-for route in create_rest_routes(request_handler=handler):
-    app.router.routes.append(route)
-
-
-@app.middleware("http")
-async def protect_extended_agent_card(request: Request, call_next):
-    if request.url.path.rstrip("/") == EXTENDED_CARD_PATH:
-        try:
-            await verify_bearer_or_raise(request.headers.get("authorization"))
-        except PermissionError as e:
-            return JSONResponse({"detail": str(e)}, status_code=401)
-
-    return await call_next(request)
-
+app = build_app()
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8001)
+    uvicorn.run(app, host=HOST, port=PORT)

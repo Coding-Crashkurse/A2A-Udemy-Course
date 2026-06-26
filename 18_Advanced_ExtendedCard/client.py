@@ -2,29 +2,39 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from typing import Any, cast
 
 import httpx
 from dotenv import load_dotenv
-from google.protobuf.json_format import MessageToDict, ParseDict
+from google.protobuf.json_format import MessageToDict
 
+from a2a.client import A2AClientError, ClientConfig, create_client
 from a2a.client.card_resolver import A2ACardResolver
-from a2a.types import AgentCard
+from a2a.types import AgentCard, GetExtendedAgentCardRequest
+from a2a.utils import TransportProtocol
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
-AUTH0_DOMAIN = os.environ["AUTH0_DOMAIN"]
-AUTH0_CLIENT_ID = os.environ["AUTH0_CLIENT_ID"]
-AUTH0_CLIENT_SECRET = os.environ["AUTH0_CLIENT_SECRET"]
-AUTH0_AUDIENCE = os.environ["AUTH0_AUDIENCE"]
+AUTH0_DOMAIN: str = os.environ["AUTH0_DOMAIN"]
+AUTH0_CLIENT_ID: str = os.environ["AUTH0_CLIENT_ID"]
+AUTH0_CLIENT_SECRET: str = os.environ["AUTH0_CLIENT_SECRET"]
+AUTH0_AUDIENCE: str = os.environ["AUTH0_AUDIENCE"]
 
-A2A_BASE_URL = os.environ.get("A2A_BASE_URL", "http://localhost:8001")
+A2A_BASE_URL: str = os.environ.get("A2A_BASE_URL", "http://localhost:8001")
 
-TOKEN_URL = f"https://{AUTH0_DOMAIN}/oauth/token"
-EXTENDED_CARD_URL = f"{A2A_BASE_URL}/v1/extendedAgentCard"
+TOKEN_URL: str = f"https://{AUTH0_DOMAIN}/oauth/token"
+
+
+def _dump(card: AgentCard) -> str:
+    return json.dumps(
+        MessageToDict(card, preserving_proto_field_name=True),
+        indent=2,
+        ensure_ascii=False,
+    )
 
 
 async def fetch_token(http: httpx.AsyncClient) -> str:
-    payload = {
+    payload: dict[str, Any] = {
         "grant_type": "client_credentials",
         "client_id": AUTH0_CLIENT_ID,
         "client_secret": AUTH0_CLIENT_SECRET,
@@ -35,60 +45,46 @@ async def fetch_token(http: httpx.AsyncClient) -> str:
     if r.status_code != 200:
         print(f"AUTH0 TOKEN ERROR -> http={r.status_code}")
         ct = r.headers.get("content-type", "")
-        if "application/json" in ct:
-            print(r.json())
-        else:
-            print(r.text)
+        print(json.dumps(r.json(), indent=2) if "application/json" in ct else r.text)
         raise SystemExit(1)
 
-    data = r.json()
-    token = data.get("access_token")
-    if not isinstance(token, str) or not token:
-        raise SystemExit("AUTH0 response missing access_token")
-    return token
+    data = cast(dict[str, Any], r.json())
+    return cast(str, data["access_token"])
+
+
+def build_config(http: httpx.AsyncClient) -> ClientConfig:
+    return ClientConfig(
+        supported_protocol_bindings=[TransportProtocol.HTTP_JSON],
+        httpx_client=http,
+        streaming=False,
+        polling=False,
+    )
 
 
 async def main() -> None:
     async with httpx.AsyncClient(timeout=15.0) as http:
-        print("\n=== 1) PUBLIC AGENT CARD ===")
+        print("\n=== 1) PUBLIC AGENT CARD (no auth) ===")
         public_card = await A2ACardResolver(http, A2A_BASE_URL).get_agent_card()
-        print(
-            json.dumps(
-                MessageToDict(public_card, preserving_proto_field_name=True),
-                indent=2,
-                ensure_ascii=False,
-            )
-        )
+        print(_dump(public_card))
+
+        client = await create_client(public_card, client_config=build_config(http))
+        request = GetExtendedAgentCardRequest()
 
         print("\n=== 2) EXTENDED AGENT CARD (WITHOUT TOKEN) ===")
-        r = await http.get(EXTENDED_CARD_URL, headers={"A2A-Version": "1.0"})
-        print(f"HTTP {r.status_code}")
-        print(r.text)
+        try:
+            await client.get_extended_agent_card(request)
+            print("Unexpected success (expected 401)")
+        except A2AClientError as exc:
+            print(f"Rejected as expected -> {exc}")
 
         print("\n=== 3) AUTHENTICATE (CLIENT CREDENTIALS) ===")
         token = await fetch_token(http)
+        http.headers["Authorization"] = f"Bearer {token}"
         print("Token received. (not printing token)")
 
         print("\n=== 4) EXTENDED AGENT CARD (WITH TOKEN) ===")
-        r = await http.get(
-            EXTENDED_CARD_URL,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "A2A-Version": "1.0",
-            },
-        )
-        print(f"HTTP {r.status_code}")
-        r.raise_for_status()
-
-        extended_card = AgentCard()
-        ParseDict(r.json(), extended_card)
-        print(
-            json.dumps(
-                MessageToDict(extended_card, preserving_proto_field_name=True),
-                indent=2,
-                ensure_ascii=False,
-            )
-        )
+        extended_card = await client.get_extended_agent_card(request)
+        print(_dump(extended_card))
 
 
 if __name__ == "__main__":
