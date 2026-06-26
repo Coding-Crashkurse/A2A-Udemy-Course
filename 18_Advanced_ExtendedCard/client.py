@@ -82,7 +82,9 @@ async def main() -> None:
         print("Token received. (not printing token)")
 
         print("\n=== 4) EXTENDED AGENT CARD (WITH TOKEN) ===")
-        extended_card = await client.get_extended_agent_card(GetExtendedAgentCardRequest())
+        extended_card = await client.get_extended_agent_card(
+            GetExtendedAgentCardRequest()
+        )
         print(_dump(extended_card))
 
 
