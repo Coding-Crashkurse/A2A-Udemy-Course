@@ -23,8 +23,6 @@ from a2a.types import (
 )
 from a2a.utils import TransportProtocol
 
-load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
-
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger("ChatContextExtensionDemo")
 
