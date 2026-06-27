@@ -5,7 +5,7 @@ import typer
 
 from a2a.client import ClientConfig, create_client
 from a2a.client.card_resolver import A2ACardResolver
-from a2a.helpers import get_message_text, new_text_message
+from a2a.helpers import get_artifact_text, new_text_message
 from a2a.types import Role, SendMessageRequest
 from a2a.utils import TransportProtocol
 
@@ -19,8 +19,7 @@ def main(
     text: str = typer.Option("Explain the offside rule in soccer briefly."),
 ) -> None:
     async def _run() -> None:
-        timeout = httpx.Timeout(60.0, connect=10.0)
-        async with httpx.AsyncClient(timeout=timeout) as http:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as http:
             card = await A2ACardResolver(http, BASE_URL).get_agent_card()
 
             client = await create_client(
@@ -28,7 +27,7 @@ def main(
                 client_config=ClientConfig(
                     httpx_client=http,
                     supported_protocol_bindings=[TransportProtocol.HTTP_JSON],
-                    streaming=False,
+                    streaming=True,
                     polling=False,
                 ),
             )
@@ -39,14 +38,11 @@ def main(
                 )
                 last_text = ""
                 async for reply in client.send_message(request):
-                    if reply.HasField("task"):
-                        if reply.task.status.HasField("message"):
-                            last_text = get_message_text(reply.task.status.message)
-                    elif reply.HasField("status_update"):
-                        if reply.status_update.status.HasField("message"):
-                            last_text = get_message_text(
-                                reply.status_update.status.message
-                            )
+                    if reply.HasField("artifact_update"):
+                        last_text = get_artifact_text(reply.artifact_update.artifact)
+                    elif reply.HasField("task"):
+                        for artifact in reply.task.artifacts:
+                            last_text = get_artifact_text(artifact)
 
                 print(last_text)
             finally:

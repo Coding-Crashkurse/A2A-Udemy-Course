@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from a2a.client import ClientConfig, create_client
 from a2a.client.card_resolver import A2ACardResolver
 from a2a.helpers import (
-    get_message_text,
+    get_artifact_text,
     new_task_from_user_message,
     new_text_message,
 )
@@ -30,8 +30,10 @@ from a2a.types import (
     AgentCard,
     AgentInterface,
     AgentSkill,
+    Part,
     Role,
     SendMessageRequest,
+    TaskState,
 )
 from a2a.utils import TransportProtocol
 
@@ -92,6 +94,20 @@ def _card_url(card: AgentCard) -> str:
 
 class OrchestratorExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        user_text = context.get_user_input()
+
+        task = new_task_from_user_message(context.message)
+        await event_queue.enqueue_event(task)
+
+        updater = TaskUpdater(event_queue, task.id, task.context_id)
+        await updater.start_work(
+            new_text_message(
+                text="Routing your request to the right agent...",
+                context_id=task.context_id,
+                task_id=task.id,
+            )
+        )
+
         timeout = httpx.Timeout(60.0, connect=10.0)
 
         async with httpx.AsyncClient(timeout=timeout) as http:
@@ -146,7 +162,6 @@ class OrchestratorExecutor(AgentExecutor):
                     ),
                 )
 
-                user_text = context.get_user_input()
                 router_result = await router.ainvoke(
                     {"messages": [HumanMessage(content=user_text)]}
                 )
@@ -159,21 +174,25 @@ class OrchestratorExecutor(AgentExecutor):
                     football_client if decision.target == "football" else general_client
                 )
 
+                await updater.update_status(
+                    TaskState.TASK_STATE_WORKING,
+                    new_text_message(
+                        text=f'Consulting agent "{used_card.name}"...',
+                        context_id=task.context_id,
+                        task_id=task.id,
+                    ),
+                )
+
                 outbound = new_text_message(text=decision.query, role=Role.ROLE_USER)
 
                 request = SendMessageRequest(message=outbound)
                 remote_text = ""
                 async for reply in used_client.send_message(request):
-                    if reply.HasField("task"):
-                        if reply.task.status.HasField("message"):
-                            remote_text = get_message_text(reply.task.status.message)
-                    elif reply.HasField("status_update"):
-                        if reply.status_update.status.HasField("message"):
-                            remote_text = get_message_text(
-                                reply.status_update.status.message
-                            )
-                    elif reply.HasField("message"):
-                        remote_text = get_message_text(reply.message)
+                    if reply.HasField("artifact_update"):
+                        remote_text = get_artifact_text(reply.artifact_update.artifact)
+                    elif reply.HasField("task"):
+                        for artifact in reply.task.artifacts:
+                            remote_text = get_artifact_text(artifact)
 
                 finalizer = create_agent(
                     model=FINALIZER_MODEL,
@@ -204,17 +223,12 @@ class OrchestratorExecutor(AgentExecutor):
                 )
                 final: FinalAnswer = finalizer_result["structured_response"]
 
-                task = new_task_from_user_message(context.message)
-                await event_queue.enqueue_event(task)
-
-                updater = TaskUpdater(event_queue, task.id, task.context_id)
-                await updater.complete(
-                    new_text_message(
-                        text=final.answer,
-                        context_id=task.context_id,
-                        task_id=task.id,
-                    )
+                await updater.add_artifact(
+                    [Part(text=final.answer)],
+                    name="final_answer",
+                    last_chunk=True,
                 )
+                await updater.complete()
 
                 log.info(
                     "completed task_id=%s routed_to=%s agent=%s reason=%s",
@@ -245,7 +259,7 @@ agent_card = AgentCard(
             protocol_binding=TransportProtocol.HTTP_JSON,
         ),
     ],
-    capabilities=AgentCapabilities(streaming=False, push_notifications=False),
+    capabilities=AgentCapabilities(streaming=True, push_notifications=False),
     default_input_modes=["text/plain"],
     default_output_modes=["text/plain"],
     skills=[
