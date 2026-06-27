@@ -5,7 +5,7 @@ import typer
 
 from a2a.client import ClientConfig, create_client
 from a2a.client.card_resolver import A2ACardResolver
-from a2a.helpers import get_artifact_text, new_text_message
+from a2a.helpers import get_artifact_text, get_message_text, new_text_message
 from a2a.types import Role, SendMessageRequest
 from a2a.utils import TransportProtocol
 
@@ -38,12 +38,17 @@ def main(
                 )
                 last_text = ""
                 async for reply in client.send_message(request):
-                    if reply.HasField("artifact_update"):
+                    if reply.HasField("status_update"):
+                        status = reply.status_update.status
+                        if status.HasField("message"):
+                            print(f"[update] {get_message_text(status.message)}")
+                    elif reply.HasField("artifact_update"):
                         last_text = get_artifact_text(reply.artifact_update.artifact)
                     elif reply.HasField("task"):
                         for artifact in reply.task.artifacts:
                             last_text = get_artifact_text(artifact)
 
+                print()
                 print(last_text)
             finally:
                 await client.close()
