@@ -85,12 +85,12 @@ agent_card = AgentCard(
         streaming=False,
         push_notifications=False,
         extensions=[
-            {
-                "uri": CHAT_EXTENSION_URI,
-                "description": "Client must send chat context in message.metadata[URI]; validated server-side via Pydantic.",
-                "required": True,
-                "params": {"payloadSchema": ChatContext.model_json_schema()},
-            }
+            AgentExtension(
+                uri=CHAT_EXTENSION_URI,
+                description="Client must send chat context in message.metadata[URI]; validated server-side via Pydantic.",
+                required=True,
+                params={"payloadSchema": ChatContext.model_json_schema()},
+            )
         ],
     ),
     default_input_modes=["text/plain"],
